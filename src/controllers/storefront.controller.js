@@ -247,20 +247,24 @@ exports.getAppearance = async (req, res, next) => {
         { $setOnInsert: { storeId: 'default' } },
         { upsert: true, new: true }
       ),
-      StoreSettings.findOne({ storeId: 'default' }).select('regional orders general social').lean(),
+      StoreSettings.findOne({ storeId: 'default' }).select('regional orders general social shipping').lean(),
     ]);
     const data = appearance.toObject();
 
-    // Migrate old promoBanner1/2 format → promoBanners array
+    // Migrate old promoBanner1/2 format → promoBanners array, but only when
+    // one of them actually has real content — otherwise leave promoBanners
+    // empty so the storefront hides the section instead of showing blank
+    // placeholder banners for a tenant that hasn't configured any.
     if (!data.homepageContent) data.homepageContent = {};
     const hc = data.homepageContent;
     if (!hc.promoBanners || hc.promoBanners.length === 0) {
       const b1 = hc.promoBanner1 || {};
       const b2 = hc.promoBanner2 || {};
-      hc.promoBanners = [
-        { subtitle: b1.subtitle || '', title: b1.title || '', cta: b1.cta || 'Shop Now', link: b1.link || '/products', image: b1.image || null },
-        { subtitle: b2.subtitle || '', title: b2.title || '', cta: b2.cta || 'Explore',  link: b2.link || '/products', image: b2.image || null },
-      ];
+      const migrated = [
+        b1.title && { subtitle: b1.subtitle || '', title: b1.title, cta: b1.cta || 'Shop Now', link: b1.link || '/products', image: b1.image || null },
+        b2.title && { subtitle: b2.subtitle || '', title: b2.title, cta: b2.cta || 'Explore',  link: b2.link || '/products', image: b2.image || null },
+      ].filter(Boolean);
+      hc.promoBanners = migrated;
     }
 
     data.regional = storeSettings?.regional ?? {};
@@ -272,6 +276,16 @@ exports.getAppearance = async (req, res, next) => {
     data.supportEmail = storeSettings?.general?.supportEmail || '';
     data.phone        = storeSettings?.general?.phone        || '';
     data.address      = storeSettings?.general?.address      || '';
+    // Real order/shipping policy fields, already admin-editable in
+    // Settings → Orders / Shipping — used to back the storefront's Shipping
+    // Policy and Returns & Exchanges pages instead of static placeholder text.
+    data.policies = {
+      allowCancel:        storeSettings?.orders?.allowCancel        ?? true,
+      cancellationWindow: storeSettings?.orders?.cancellationWindow || '',
+      refundMethod:       storeSettings?.orders?.refundMethod       || '',
+      metroDeliveryTime:  storeSettings?.shipping?.metroDeliveryTime  || '',
+      restOfCountryTime:  storeSettings?.shipping?.restOfCountryTime  || '',
+    };
     data.social = {
       facebook:  storeSettings?.social?.facebook  || '',
       instagram: storeSettings?.social?.instagram || '',

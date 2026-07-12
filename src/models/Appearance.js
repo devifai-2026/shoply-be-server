@@ -83,10 +83,9 @@ const appearanceSchema = new mongoose.Schema({
         link:     { type: String, default: '/products' },
         image:    { type: String, default: null },
       }],
-      default: [
-        { subtitle: 'New Season',       title: 'Gear Up for the Crag',   cta: 'Shop Now', link: '/products', image: null },
-        { subtitle: 'Performance Tech', title: 'Alpine Ready Apparel',    cta: 'Explore',  link: '/products', image: null },
-      ],
+      // No seeded placeholder banners — a new tenant sees nothing until they
+      // configure real ones in Appearance → Homepage → Promotional Banners.
+      default: [],
       validate: { validator: (v) => v.length <= 5, message: 'Maximum 5 banners allowed' },
     },
     // Admin-editable "Shop by Category/Activity" homepage tile row — replaces
