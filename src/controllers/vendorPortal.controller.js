@@ -1,5 +1,12 @@
 const { getProductModel } = require('../models/Product');
 const { getSubOrderModel } = require('../models/SubOrder');
+const { getOrderModel } = require('../models/Order');
+const { getVendorModel } = require('../models/Vendor');
+const { getWithdrawalRequestModel } = require('../models/WithdrawalRequest');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
+const shiprocket = require('../services/shiprocket.service');
+const delhivery  = require('../services/delhivery.service');
+const { rollupOrderStatus } = require('../utils/orderStatusRollup');
 
 // Turn uploaded files into server-relative URLs (served from /uploads)
 exports.uploadImages = async (req, res, next) => {
@@ -109,6 +116,7 @@ const VENDOR_STATUS_FLOW = {
 exports.updateSubOrderStatus = async (req, res, next) => {
   try {
     const SubOrder = getSubOrderModel(req.tenantConn);
+    const Order    = getOrderModel(req.tenantConn);
     const { status, trackingNumber, courierName, note } = req.body;
     const subOrder = await SubOrder.findOne({ _id: req.params.id, vendor: req.vendor._id });
     if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -123,6 +131,7 @@ exports.updateSubOrderStatus = async (req, res, next) => {
     if (courierName)    subOrder.courierName = courierName;
     subOrder.timeline.push({ status, note: note || `Updated by vendor` });
     await subOrder.save();
+    await rollupOrderStatus(Order, SubOrder, subOrder.order);
     res.json({ success: true, data: subOrder });
   } catch (err) { next(err); }
 };
@@ -176,37 +185,127 @@ exports.dashboard = async (req, res, next) => {
 };
 
 // ─── Earnings / payouts ──────────────────────────────────────────────────────
+//
+// Balance model: settledEarning is simply Vendor.totalWithdrawn (a running
+// ledger incremented only when an admin marks a WithdrawalRequest paid).
+// pendingEarning is the delivered-order earnings not yet withdrawn, minus
+// whatever is reserved by an outstanding pending withdrawal request. This
+// deliberately does NOT read/write SubOrder.settledAt — that field is legacy
+// and unused; per-suborder settlement tracking isn't needed since nobody
+// needs to know which specific suborder "paid for" a withdrawal, only totals.
 
 exports.earnings = async (req, res, next) => {
   try {
-    const SubOrder = getSubOrderModel(req.tenantConn);
+    const SubOrder          = getSubOrderModel(req.tenantConn);
+    const Vendor            = getVendorModel(req.tenantConn);
+    const WithdrawalRequest = getWithdrawalRequestModel(req.tenantConn);
     const vendorId = req.vendor._id;
     const { page, limit, skip } = paginate(req);
 
-    const [summary, rows, total] = await Promise.all([
+    const [earningAgg, vendor, pendingRequest, rows, total] = await Promise.all([
       SubOrder.aggregate([
         { $match: { vendor: vendorId, status: 'delivered' } },
-        { $group: {
-            _id: { $ne: ['$settledAt', null] },
-            earning: { $sum: '$vendorEarning' }, count: { $sum: 1 },
-        } },
+        { $group: { _id: null, total: { $sum: '$vendorEarning' } } },
       ]),
+      Vendor.findById(vendorId).select('totalWithdrawn').lean(),
+      WithdrawalRequest.findOne({ vendor: vendorId, status: 'pending' }).lean(),
       SubOrder.find({ vendor: vendorId, status: 'delivered' })
-        .select('subNumber subtotal commissionRate commissionAmount vendorEarning settledAt createdAt')
+        .select('subNumber subtotal commissionRate commissionAmount vendorEarning createdAt')
         .sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       SubOrder.countDocuments({ vendor: vendorId, status: 'delivered' }),
     ]);
 
-    const settled = summary.find(s => s._id === true);
-    const pending = summary.find(s => s._id === false);
+    const totalEarned          = earningAgg[0]?.total || 0;
+    const totalWithdrawn       = vendor?.totalWithdrawn || 0;
+    const pendingWithdrawalAmt = pendingRequest?.amount || 0;
+    const pendingEarning       = Math.max(0, totalEarned - totalWithdrawn);
+    const availableForWithdrawal = Math.max(0, pendingEarning - pendingWithdrawalAmt);
+
     res.json({
       success: true,
       data: {
-        settledEarning: settled?.earning || 0,
-        pendingEarning: pending?.earning || 0,
+        settledEarning:          totalWithdrawn,
+        pendingEarning,
+        pendingWithdrawalAmount: pendingWithdrawalAmt,
+        availableForWithdrawal,
+        hasPendingWithdrawal:    !!pendingRequest,
         entries: rows,
       },
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
+  } catch (err) { next(err); }
+};
+
+// ─── Withdrawal requests ──────────────────────────────────────────────────────
+
+exports.listWithdrawals = async (req, res, next) => {
+  try {
+    const WithdrawalRequest = getWithdrawalRequestModel(req.tenantConn);
+    const { page, limit, skip } = paginate(req);
+    const [rows, total] = await Promise.all([
+      WithdrawalRequest.find({ vendor: req.vendor._id }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      WithdrawalRequest.countDocuments({ vendor: req.vendor._id }),
+    ]);
+    res.json({ success: true, data: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) { next(err); }
+};
+
+exports.requestWithdrawal = async (req, res, next) => {
+  try {
+    const WithdrawalRequest = getWithdrawalRequestModel(req.tenantConn);
+    const SubOrder          = getSubOrderModel(req.tenantConn);
+    const Vendor            = getVendorModel(req.tenantConn);
+    const vendorId = req.vendor._id;
+
+    const amt = Number(req.body.amount);
+    if (!amt || amt <= 0) {
+      return res.status(400).json({ success: false, message: 'Enter a valid amount' });
+    }
+
+    const existing = await WithdrawalRequest.exists({ vendor: vendorId, status: 'pending' });
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'You already have a pending withdrawal request' });
+    }
+
+    const [earningAgg] = await SubOrder.aggregate([
+      { $match: { vendor: vendorId, status: 'delivered' } },
+      { $group: { _id: null, total: { $sum: '$vendorEarning' } } },
+    ]);
+    const totalEarned    = earningAgg?.total || 0;
+    const vendor         = await Vendor.findById(vendorId).select('totalWithdrawn').lean();
+    const pendingBalance = Math.max(0, totalEarned - (vendor?.totalWithdrawn || 0));
+
+    if (amt > pendingBalance) {
+      return res.status(400).json({ success: false, message: `Amount exceeds available balance (₹${pendingBalance})` });
+    }
+
+    const request = await WithdrawalRequest.create({ vendor: vendorId, amount: amt });
+
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
+    await AdminNotification.create({
+      type:    'withdrawal',
+      title:   'New Withdrawal Request',
+      message: `${req.vendor.storeName} requested a withdrawal of ₹${amt}`,
+      link:    `/withdrawals`,
+    });
+
+    res.status(201).json({ success: true, data: request });
+  } catch (err) { next(err); }
+};
+
+// ─── Per-vendor shipment tracking ─────────────────────────────────────────────
+
+exports.trackSubOrder = async (req, res, next) => {
+  try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
+    const subOrder = await SubOrder.findOne({ _id: req.params.id, vendor: req.vendor._id })
+      .select('awbCode courierSlug subNumber');
+    if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
+    if (!subOrder.awbCode) {
+      return res.status(400).json({ success: false, message: 'No shipment booked yet for this order' });
+    }
+    const tracker = subOrder.courierSlug === 'delhivery' ? delhivery : shiprocket;
+    const liveTracking = await tracker.trackShipment(subOrder.awbCode).catch(() => null);
+    res.json({ success: true, data: { awbCode: subOrder.awbCode, liveTracking } });
   } catch (err) { next(err); }
 };

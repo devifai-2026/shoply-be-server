@@ -31,6 +31,7 @@ router.use('/inventory',          require('./inventory.routes'));
 router.use('/orders',             require('./order.routes'));
 router.use('/customers',          require('./customer.routes'));
 router.use('/vendors',            require('./vendorAdmin.routes'));
+router.use('/withdrawals',        require('./withdrawal.routes'));
 router.use('/coupons',            require('./coupon.routes'));
 router.use('/flash-sales',        require('./flashSale.routes'));
 router.use('/offers',             require('./offer.routes'));

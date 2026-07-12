@@ -10,12 +10,15 @@ const { getCourierModel }           = require('../models/Courier');
 const shiprocket        = require('../services/shiprocket.service');
 const pricing           = require('../services/pricing.service');
 const emailService      = require('../services/email.service');
+const { rollupOrderStatus } = require('../utils/orderStatusRollup');
 
+// Books a single Shiprocket shipment for a store-owned order (no vendor
+// split — the store itself fulfills these, so the fixed 'Primary' pickup
+// location is correct here, unlike the per-vendor path below).
 async function autoBookShiprocket(order, { Courier, Customer, Order }) {
   const courier = await Courier.findOne({ slug: 'shiprocket', isActive: true });
   if (!courier) return;
 
-  // Populate customer so Shiprocket gets email + phone
   const customer = await Customer.findById(order.customer).select('name email phone').lean();
   const orderWithCustomer = Object.assign(order.toObject ? order.toObject() : { ...order }, { customer });
 
@@ -47,20 +50,83 @@ async function autoBookShiprocket(order, { Courier, Customer, Order }) {
     $push: { timeline: { status: 'processing', note: `Shipment auto-booked via Shiprocket. AWB: ${awbCode}` } },
   });
 
-  if (awbCode) {
-    const customer = await Customer.findById(order.customer).select('email name').lean();
-    if (customer?.email) {
-      await emailService.sendTrackingEmail({
-        toEmail: customer.email,
-        toName:  customer.name || 'Customer',
-        order:   {
-          orderNumber:    order.orderNumber,
-          awbCode,
-          trackingNumber: awbCode,
-          courierName:    'Shiprocket',
-        },
-      });
-    }
+  if (awbCode && customer?.email) {
+    await emailService.sendTrackingEmail({
+      toEmail: customer.email,
+      toName:  customer.name || 'Customer',
+      order:   {
+        orderNumber:    order.orderNumber,
+        awbCode,
+        trackingNumber: awbCode,
+        courierName:    'Shiprocket',
+      },
+    });
+  }
+}
+
+// Books an independent Shiprocket shipment for ONE vendor's slice of a
+// (possibly multi-vendor) order. A vendor without a registered Shiprocket
+// pickup location is BLOCKED, not soft-defaulted to a shared address — the
+// SubOrder stays pending with a timeline note and an AdminNotification is
+// raised so the admin can register the vendor's pickup location.
+async function autoBookShiprocketForSubOrder(subOrder, order, { Courier, Customer, SubOrder, Vendor, AdminNotification, Order }) {
+  const courier = await Courier.findOne({ slug: 'shiprocket', isActive: true });
+  if (!courier) return;
+
+  const customer = await Customer.findById(order.customer).select('name email phone').lean();
+  const vendor    = await Vendor.findById(subOrder.vendor).select('storeName pickupAddress shiprocketPickupLocation').lean();
+
+  if (!vendor?.shiprocketPickupLocation) {
+    await SubOrder.findByIdAndUpdate(subOrder._id, {
+      $push: { timeline: { status: subOrder.status, note: 'Shipment blocked: vendor has no registered pickup location. Contact admin.' } },
+    });
+    await AdminNotification.create({
+      type:    'shipping_blocked',
+      title:   'Shipment blocked — missing pickup location',
+      message: `${vendor?.storeName || 'A vendor'} has no registered Shiprocket pickup location; sub-order ${subOrder.subNumber} could not be booked.`,
+      link:    `/vendors/${subOrder.vendor}`,
+    });
+    return;
+  }
+
+  // Build a Shiprocket-shaped "order" from just this vendor's items, so
+  // Shiprocket sees a distinct order per vendor rather than the whole cart.
+  const subOrderForShiprocket = {
+    orderNumber:     subOrder.subNumber,
+    createdAt:       order.createdAt,
+    shippingAddress: order.shippingAddress,
+    paymentMethod:   order.paymentMethod,
+    subtotal:        subOrder.subtotal,
+    items:           subOrder.items,
+    customer,
+  };
+
+  let created = await shiprocket.createOrder(subOrderForShiprocket, vendor.shiprocketPickupLocation);
+  if (!created.shipment_id && created.data?.data?.[0]?.pickup_location) {
+    created = await shiprocket.createOrder(subOrderForShiprocket, created.data.data[0].pickup_location);
+  }
+  if (!created.shipment_id) {
+    throw new Error(`Shiprocket createOrder failed for ${subOrder.subNumber}: ${created.message || JSON.stringify(created)}`);
+  }
+
+  const shipmentId = String(created.shipment_id);
+  const awbResp     = await shiprocket.assignAWB({ shipment_id: shipmentId });
+  const awbCode     = awbResp?.response?.data?.awb_code || awbResp?.awb_code;
+
+  await SubOrder.findByIdAndUpdate(subOrder._id, {
+    awbCode, shipmentId,
+    courierSlug: 'shiprocket', courierName: 'Shiprocket',
+    trackingNumber: awbCode,
+    status: 'processing',
+    $push: { timeline: { status: 'processing', note: `Shipment auto-booked via Shiprocket. AWB: ${awbCode}` } },
+  });
+  await rollupOrderStatus(Order, SubOrder, subOrder.order);
+
+  if (awbCode && customer?.email) {
+    await emailService.sendTrackingEmail({
+      toEmail: customer.email, toName: customer.name || 'Customer',
+      order: { orderNumber: subOrder.subNumber, awbCode, trackingNumber: awbCode, courierName: 'Shiprocket' },
+    });
   }
 }
 
@@ -170,13 +236,33 @@ exports.createOrder = async (req, res, next) => {
       if (!vendorGroups.has(vendorId)) vendorGroups.set(vendorId, []);
       vendorGroups.get(vendorId).push(item);
     }
+
+    let createdSubOrders = [];
     if (vendorGroups.size) {
       const vendors  = await Vendor.find({ _id: { $in: [...vendorGroups.keys()] } })
         .select('commissionRate').lean();
       const rateMap  = Object.fromEntries(vendors.map(v => [v._id.toString(), v.commissionRate || 0]));
 
+      // Split the order's one flat shippingCost proportionally by each
+      // vendor's share of the order subtotal, so real per-vendor courier
+      // bookings map to real per-vendor accounting instead of one flat
+      // charge covering N independent shipments. The largest-remainder
+      // group absorbs any rounding leftover so the parts sum exactly to
+      // Order.shippingCost.
+      const groupEntries = [...vendorGroups.entries()];
+      const rawShares = groupEntries.map(([, vendorItems]) => {
+        const vendorSubtotal = vendorItems.reduce((s, i) => s + i.price * i.quantity, 0);
+        return subtotal > 0 ? (vendorSubtotal / subtotal) * shippingCost : 0;
+      });
+      const roundedShares = rawShares.map(s => Math.round(s));
+      const roundedTotal  = roundedShares.reduce((a, b) => a + b, 0);
+      const remainder     = shippingCost - roundedTotal;
+      if (remainder !== 0 && roundedShares.length) {
+        roundedShares[roundedShares.length - 1] += remainder; // last group absorbs rounding drift
+      }
+
       let seq = 0;
-      const subOrders = [...vendorGroups.entries()].map(([vendorId, vendorItems]) => {
+      const subOrders = groupEntries.map(([vendorId, vendorItems], idx) => {
         seq += 1;
         const vendorSubtotal   = vendorItems.reduce((s, i) => s + i.price * i.quantity, 0);
         const commissionRate   = rateMap[vendorId] ?? 0;
@@ -188,13 +274,14 @@ exports.createOrder = async (req, res, next) => {
           vendor:      vendorId,
           items:       vendorItems,
           subtotal:    vendorSubtotal,
+          shippingCost: roundedShares[idx],
           commissionRate,
           commissionAmount,
           vendorEarning: Math.round((vendorSubtotal - commissionAmount) * 100) / 100,
           timeline:    [{ status: 'pending', note: 'Order placed' }],
         };
       });
-      await SubOrder.create(subOrders);
+      createdSubOrders = await SubOrder.create(subOrders);
       await Promise.all(subOrders.map(s =>
         Vendor.findByIdAndUpdate(s.vendor, { $inc: { totalSales: s.subtotal } })
       ));
@@ -222,10 +309,21 @@ exports.createOrder = async (req, res, next) => {
       link:    `/orders/${order._id}`,
     });
 
-    // Auto-book shipment via Shiprocket if active — runs after response is sent
-    autoBookShiprocket(order, { Courier, Customer, Order }).catch(err =>
-      console.error(`[AutoBook] Shiprocket failed for ${order.orderNumber}:`, err.message, err.response?.data || '')
-    );
+    // Auto-book shipment(s) via Shiprocket if active — runs after response is
+    // sent. Orders with a vendor split get one independent booking per
+    // vendor's SubOrder; pure store-owned orders keep booking against the
+    // whole Order as before.
+    if (createdSubOrders.length) {
+      createdSubOrders.forEach(so =>
+        autoBookShiprocketForSubOrder(so, order, { Courier, Customer, SubOrder, Vendor, AdminNotification, Order }).catch(err =>
+          console.error(`[AutoBook] Shiprocket failed for suborder ${so.subNumber}:`, err.message, err.response?.data || '')
+        )
+      );
+    } else {
+      autoBookShiprocket(order, { Courier, Customer, Order }).catch(err =>
+        console.error(`[AutoBook] Shiprocket failed for ${order.orderNumber}:`, err.message, err.response?.data || '')
+      );
+    }
 
     // Send order confirmation email — non-blocking
     if (req.customer?.email) {
@@ -290,28 +388,53 @@ exports.getInvoice = async (req, res, next) => {
 
 exports.trackOrder = async (req, res, next) => {
   try {
-    const Order = getOrderModel(req.tenantConn);
+    const Order    = getOrderModel(req.tenantConn);
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const order = await Order.findOne({ _id: req.params.id, customer: req.customer._id })
       .select('orderNumber status awbCode courierName courierSlug trackingNumber timeline shippingAddress createdAt');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
+    const subOrders = await SubOrder.find({ order: order._id })
+      .populate('vendor', 'storeName')
+      .select('subNumber vendor status awbCode courierName courierSlug trackingNumber timeline')
+      .lean();
+
+    // Multi-vendor orders: each vendor's parcel has its own real AWB, so
+    // surface them individually rather than one (potentially absent or
+    // misleading) Order-level tracking number.
+    const shipments = await Promise.all(subOrders.map(async (so) => {
+      let liveTracking = null;
+      if (so.awbCode && so.courierSlug === 'shiprocket') {
+        liveTracking = await shiprocket.trackShipment(so.awbCode).catch(() => null);
+      }
+      return {
+        vendorName:     so.vendor?.storeName || null,
+        subNumber:      so.subNumber,
+        status:         so.status,
+        awbCode:        so.awbCode,
+        courierName:    so.courierName,
+        trackingNumber: so.trackingNumber,
+        timeline:       so.timeline,
+        liveTracking,
+      };
+    }));
+
     const response = {
-      orderNumber:    order.orderNumber,
-      status:         order.status,
-      awbCode:        order.awbCode,
-      courierName:    order.courierName,
-      trackingNumber: order.trackingNumber,
-      timeline:       order.timeline,
-      placedAt:       order.createdAt,
+      orderNumber: order.orderNumber,
+      status:      order.status,
+      timeline:    order.timeline,
+      placedAt:    order.createdAt,
+      shipments,
+      // Legacy single-shipment fields — only meaningful for store-owned
+      // orders (no vendor split); left as-is for backward compatibility.
+      awbCode:        subOrders.length ? null : order.awbCode,
+      courierName:    subOrders.length ? null : order.courierName,
+      trackingNumber: subOrders.length ? null : order.trackingNumber,
       liveTracking:   null,
     };
 
-    if (order.awbCode && order.courierSlug === 'shiprocket') {
-      try {
-        response.liveTracking = await shiprocket.trackShipment(order.awbCode);
-      } catch (_) {
-        // live tracking is best-effort; don't fail the response
-      }
+    if (!subOrders.length && order.awbCode && order.courierSlug === 'shiprocket') {
+      response.liveTracking = await shiprocket.trackShipment(order.awbCode).catch(() => null);
     }
 
     res.json({ success: true, data: response });
@@ -336,6 +459,9 @@ exports.cancelOrder = async (req, res, next) => {
     await order.save();
 
     // Cascade the cancellation to every vendor sub-order still in flight
+    const inFlightSubOrders = await SubOrder.find(
+      { order: order._id, status: { $in: ['pending', 'processing'] } },
+    ).select('awbCode courierSlug').lean();
     await SubOrder.updateMany(
       { order: order._id, status: { $in: ['pending', 'processing'] } },
       {
@@ -352,7 +478,17 @@ exports.cancelOrder = async (req, res, next) => {
       ));
     }
 
-    // Cancel Shiprocket shipment if AWB was assigned
+    // Cancel each vendor's own Shiprocket shipment (per-vendor bookings each
+    // carry their own AWB now, distinct from the legacy Order-level one).
+    inFlightSubOrders.forEach(so => {
+      if (so.awbCode && so.courierSlug === 'shiprocket') {
+        shiprocket.cancelShipment(so.awbCode).catch(err =>
+          console.error(`[Cancel] Shiprocket cancellation failed for suborder AWB ${so.awbCode}:`, err.message, err.response?.data || '')
+        );
+      }
+    });
+
+    // Cancel the legacy Order-level shipment too (store-owned orders)
     if (order.awbCode && order.courierSlug === 'shiprocket') {
       shiprocket.cancelShipment(order.awbCode).catch(err =>
         console.error(`[Cancel] Shiprocket cancellation failed for ${order.orderNumber}:`, err.message, err.response?.data || '')

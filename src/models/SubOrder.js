@@ -19,6 +19,7 @@ const subOrderSchema = new mongoose.Schema({
   }],
 
   subtotal:         { type: Number, required: true },
+  shippingCost:     { type: Number, default: 0 }, // this vendor's proportional share of Order.shippingCost
   commissionRate:   { type: Number, required: true }, // % snapshot at order time
   commissionAmount: { type: Number, required: true },
   vendorEarning:    { type: Number, required: true }, // subtotal - commission

@@ -89,3 +89,23 @@ exports.updateProfile = async (req, res, next) => {
     res.json({ success: true, data: publicVendor(req.vendor) });
   } catch (err) { next(err); }
 };
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Please provide both current and new passwords' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+    }
+    const Vendor = getVendorModel(req.tenantConn);
+    const vendor = await Vendor.findById(req.vendor._id).select('+password');
+    if (!(await vendor.matchPassword(currentPassword))) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+    }
+    vendor.password = newPassword;
+    await vendor.save();
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) { next(err); }
+};

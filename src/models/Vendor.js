@@ -31,6 +31,11 @@ const vendorSchema = new mongoose.Schema({
     country: { type: String, default: 'India' },
     phone:   { type: String, default: '' },
   },
+  // Must exactly match a pickup location name already registered in the
+  // platform's Shiprocket panel (Shiprocket has no API to register one
+  // inline) — until set, this vendor's shipments are blocked, not
+  // soft-defaulted to a shared address.
+  shiprocketPickupLocation: { type: String, default: '' },
 
   // Marketplace terms
   commissionRate: { type: Number, default: 0, min: 0, max: 100 }, // % of item subtotal
@@ -43,6 +48,7 @@ const vendorSchema = new mongoose.Schema({
 
   rating:     { type: Number, default: 0 },
   totalSales: { type: Number, default: 0 }, // lifetime gross merchandise value
+  totalWithdrawn: { type: Number, default: 0 }, // lifetime amount paid out via withdrawal requests
 }, { timestamps: true });
 
 vendorSchema.index({ status: 1 });

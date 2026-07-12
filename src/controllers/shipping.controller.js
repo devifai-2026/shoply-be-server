@@ -2,9 +2,11 @@ const { getShippingZoneModel }  = require('../models/ShippingZone');
 const { getCourierModel }       = require('../models/Courier');
 const { getStoreSettingsModel } = require('../models/StoreSettings');
 const { getOrderModel }         = require('../models/Order');
+const { getSubOrderModel }      = require('../models/SubOrder');
 const shiprocket    = require('../services/shiprocket.service');
 const delhivery     = require('../services/delhivery.service');
 const pricing       = require('../services/pricing.service');
+const { rollupOrderStatus } = require('../utils/orderStatusRollup');
 
 // ─── Zones ───────────────────────────────────────────────────────────────────
 
@@ -435,12 +437,26 @@ exports.cancelShipment = async (req, res, next) => {
  */
 exports.shiprocketWebhook = async (req, res) => {
   try {
-    const Order = getOrderModel(req.tenantConn);
+    const Order    = getOrderModel(req.tenantConn);
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const { awb, current_status } = req.body || {};
     if (!awb) return res.json({ success: true });
 
     const internalStatus = shiprocket.mapStatus(current_status);
-    if (internalStatus) {
+    if (!internalStatus) return res.json({ success: true });
+
+    // Per-vendor bookings carry their own AWB on the SubOrder — check there
+    // first; fall back to the legacy Order-level match for store-owned orders.
+    const subOrder = await SubOrder.findOne({ awbCode: awb });
+    if (subOrder) {
+      if (subOrder.status !== internalStatus) {
+        await SubOrder.findByIdAndUpdate(subOrder._id, {
+          status: internalStatus,
+          $push: { timeline: { status: internalStatus, note: `Shiprocket: ${current_status}` } },
+        });
+      }
+      await rollupOrderStatus(Order, SubOrder, subOrder.order);
+    } else {
       const order = await Order.findOne({ awbCode: awb });
       if (order && order.status !== internalStatus) {
         await Order.findByIdAndUpdate(order._id, {
@@ -462,17 +478,30 @@ exports.shiprocketWebhook = async (req, res) => {
  */
 exports.delhiveryWebhook = async (req, res) => {
   try {
-    const Order = getOrderModel(req.tenantConn);
+    const Order    = getOrderModel(req.tenantConn);
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const packages = req.body?.packages || [];
     for (const pkg of packages) {
       const waybill        = pkg.waybill;
       const internalStatus = delhivery.mapStatus(pkg.status);
-      if (waybill && internalStatus) {
+      if (!waybill || !internalStatus) continue;
+
+      const note = `Delhivery: ${pkg.status}${pkg.remarks ? ' — ' + pkg.remarks : ''}`;
+      const subOrder = await SubOrder.findOne({ awbCode: waybill });
+      if (subOrder) {
+        if (subOrder.status !== internalStatus) {
+          await SubOrder.findByIdAndUpdate(subOrder._id, {
+            status: internalStatus,
+            $push: { timeline: { status: internalStatus, note } },
+          });
+        }
+        await rollupOrderStatus(Order, SubOrder, subOrder.order);
+      } else {
         const order = await Order.findOne({ awbCode: waybill });
         if (order && order.status !== internalStatus) {
           await Order.findByIdAndUpdate(order._id, {
             status: internalStatus,
-            $push: { timeline: { status: internalStatus, note: `Delhivery: ${pkg.status}${pkg.remarks ? ' — ' + pkg.remarks : ''}` } },
+            $push: { timeline: { status: internalStatus, note } },
           });
         }
       }

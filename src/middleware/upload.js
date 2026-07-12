@@ -36,6 +36,7 @@ const uploadBrandLogo     = multer({ storage: storage('brands'), fileFilter: ima
 const uploadAppIcon       = multer({ storage: storage('branding'), fileFilter: imageFilter, limits: { fileSize: maxSize() } }).single('appIcon');
 const uploadBlogCover     = multer({ storage: storage('blogs'),    fileFilter: imageFilter, limits: { fileSize: maxSize() } }).single('coverImage');
 const uploadTenantLogo    = multer({ storage: storage('tenants'),  fileFilter: imageFilter, limits: { fileSize: maxSize() } }).single('logo');
+const uploadPayoutScreenshot = multer({ storage: storage('payouts'), fileFilter: imageFilter, limits: { fileSize: maxSize() } }).single('screenshot');
 
 module.exports = {
   uploadProductImages,
@@ -49,4 +50,5 @@ module.exports = {
   uploadAppIcon,
   uploadBlogCover,
   uploadTenantLogo,
+  uploadPayoutScreenshot,
 };
