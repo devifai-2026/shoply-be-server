@@ -24,6 +24,7 @@ router.put('/tenants/:slug/secrets',      ctrl.rotateSecrets);
 router.post('/tenants/:slug/builds',      ctrl.queueBuild);
 
 router.get('/builds', ctrl.listBuilds);
+router.get('/builds/:id/download', ctrl.buildDownload);
 
 // Platform Android signing keystore
 router.get('/keystore',          keystore.get);

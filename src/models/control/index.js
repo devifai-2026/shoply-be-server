@@ -76,8 +76,10 @@ const buildJobSchema = new Schema({
   versionName:   { type: String, default: '1.0.0' },
   versionCode:   { type: Number, default: 1 },
   status:        { type: String, enum: ['queued', 'dispatched', 'running', 'succeeded', 'failed'], default: 'queued' },
-  artifactUrl:   { type: String, default: '' },
-  error:         { type: String, default: '' },
+  artifactUrl:    { type: String, default: '' }, // legacy/public URL if any
+  artifactBucket: { type: String, default: '' },
+  artifactObject: { type: String, default: '' }, // GCS object path (private bucket)
+  error:          { type: String, default: '' },
 }, { timestamps: true });
 
 // ─── OwnerUser ─────────────────────────────────────────────────────────────────

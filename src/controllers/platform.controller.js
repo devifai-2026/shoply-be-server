@@ -223,17 +223,37 @@ exports.listBuilds = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Owner-authenticated: return a short-lived signed download URL for a build's
+// private GCS artifact.
+exports.buildDownload = async (req, res, next) => {
+  try {
+    const job = await BuildJob.findById(req.params.id);
+    if (!job || job.status !== 'succeeded') {
+      return res.status(404).json({ success: false, message: 'No downloadable artifact' });
+    }
+    if (job.artifactObject && job.artifactBucket) {
+      const url = await buildArtifacts.signedDownloadUrl(job.artifactBucket, job.artifactObject, 900);
+      return res.json({ success: true, data: { url, expiresIn: 900 } });
+    }
+    // Legacy public URL fallback
+    if (job.artifactUrl) return res.json({ success: true, data: { url: job.artifactUrl } });
+    res.status(404).json({ success: false, message: 'Artifact location unknown' });
+  } catch (err) { next(err); }
+};
+
 // Called by CI (secret-authenticated, not owner-JWT)
 exports.buildCallback = async (req, res, next) => {
   try {
     if (req.headers['x-build-secret'] !== process.env.BUILD_CALLBACK_SECRET) {
       return res.status(401).json({ success: false, message: 'Bad build secret' });
     }
-    const { status, artifactUrl, error } = req.body;
+    const { status, artifactUrl, artifactBucket, artifactObject, error } = req.body;
     const ok = status === 'succeeded';
     const job = await BuildJob.findByIdAndUpdate(req.params.id, {
       status: ok ? 'succeeded' : 'failed',
       artifactUrl: artifactUrl || '',
+      artifactBucket: artifactBucket || '',
+      artifactObject: artifactObject || '',
       error: error || '',
     }, { new: true });
 
