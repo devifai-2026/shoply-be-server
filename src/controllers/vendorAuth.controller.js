@@ -81,7 +81,7 @@ exports.me = async (req, res) => {
 
 exports.updateProfile = async (req, res, next) => {
   try {
-    const allowed = ['name', 'phone', 'description', 'bankDetails', 'pickupAddress'];
+    const allowed = ['name', 'phone', 'description', 'bankDetails', 'pickupAddress', 'shippingSettings', 'gstEnabled', 'gstin'];
     allowed.forEach((k) => {
       if (req.body[k] !== undefined) req.vendor[k] = req.body[k];
     });

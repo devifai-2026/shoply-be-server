@@ -37,6 +37,19 @@ const vendorSchema = new mongoose.Schema({
   // soft-defaulted to a shared address.
   shiprocketPickupLocation: { type: String, default: '' },
 
+  // Per-vendor shipping override — when disabled, falls back to the store's
+  // global ShippingZone table (see pricing.service.computeShipping).
+  shippingSettings: {
+    useCustomRates: { type: Boolean, default: false },
+    flatRate:       { type: Number, default: 0, min: 0 },
+    freeAbove:      { type: Number, default: null, min: 0 }, // null = no vendor-specific free-shipping threshold
+  },
+
+  // Whether this vendor's GSTIN + a GST line item are shown on invoices for
+  // their sub-orders. GST rate itself still comes from Product.gstRate /
+  // StoreSettings.orders.gstRate — this only toggles visibility/inclusion.
+  gstEnabled: { type: Boolean, default: true },
+
   // Marketplace terms
   commissionRate: { type: Number, default: 0, min: 0, max: 100 }, // % of item subtotal
   status: {
@@ -49,6 +62,11 @@ const vendorSchema = new mongoose.Schema({
   rating:     { type: Number, default: 0 },
   totalSales: { type: Number, default: 0 }, // lifetime gross merchandise value
   totalWithdrawn: { type: Number, default: 0 }, // lifetime amount paid out via withdrawal requests
+
+  // Admin-only trust toggle — this vendor's new products skip the manual/AI
+  // moderation queue and publish immediately. Vendor cannot set this
+  // themselves (not in vendorAuth's own-profile update whitelist).
+  autoApprove: { type: Boolean, default: false },
 }, { timestamps: true });
 
 vendorSchema.index({ status: 1 });

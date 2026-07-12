@@ -29,8 +29,6 @@ exports.getCart = async (req, res, next) => {
       .map(formatItem)
       .filter(Boolean);
 
-      console.log('Cart items:', items); // Debugging line to check the items
-
     res.json({ success: true, data: items });
   } catch (err) { next(err); }
 };
@@ -45,7 +43,7 @@ exports.syncCart = async (req, res, next) => {
     }
 
     const mapped = items
-      .filter(i => i.productId && i.quantity > 0)
+      .filter(i => i.productId && Number.isInteger(i.quantity) && i.quantity > 0)
       .map(i => ({ product: i.productId, quantity: i.quantity }));
 
     await Cart.findOneAndUpdate(
@@ -64,7 +62,12 @@ exports.addItem = async (req, res, next) => {
     const Cart = getCartModel(req.tenantConn);
     const Product = getProductModel(req.tenantConn);
     const { productId } = req.params;
-    const quantity = Math.max(1, parseInt(req.body.quantity) || 1);
+    const requested = parseInt(req.body.quantity, 10);
+
+    if (req.body.quantity !== undefined && (isNaN(requested) || requested <= 0)) {
+      return res.status(400).json({ success: false, message: 'Quantity must be a positive integer' });
+    }
+    const quantity = Math.max(1, requested || 1);
 
     const product = await Product.findById(productId).lean();
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -73,10 +76,11 @@ exports.addItem = async (req, res, next) => {
     if (!cart) cart = new Cart({ customer: req.customer._id, items: [] });
 
     const idx = cart.items.findIndex(i => i.product.toString() === productId);
+    const stockCap = typeof product.stock === 'number' ? product.stock : Infinity;
     if (idx >= 0) {
-      cart.items[idx].quantity += quantity;
+      cart.items[idx].quantity = Math.min(cart.items[idx].quantity + quantity, stockCap);
     } else {
-      cart.items.push({ product: productId, quantity });
+      cart.items.push({ product: productId, quantity: Math.min(quantity, stockCap) });
     }
     await cart.save();
 
@@ -85,23 +89,31 @@ exports.addItem = async (req, res, next) => {
 };
 
 // PUT /customer/cart/:productId  — body: { quantity }
+// A negative, zero, or non-numeric quantity is rejected with 400 rather than
+// silently removing the item — removal is the explicit job of DELETE.
 exports.updateItem = async (req, res, next) => {
   try {
     const Cart = getCartModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const { productId } = req.params;
-    const quantity = parseInt(req.body.quantity);
+    const quantity = parseInt(req.body.quantity, 10);
 
     if (isNaN(quantity) || quantity <= 0) {
-      await Cart.findOneAndUpdate(
-        { customer: req.customer._id },
-        { $pull: { items: { product: productId } } },
-      );
-    } else {
-      await Cart.findOneAndUpdate(
-        { customer: req.customer._id, 'items.product': productId },
-        { $set: { 'items.$.quantity': quantity } },
-      );
+      return res.status(400).json({ success: false, message: 'Quantity must be a positive integer' });
     }
+
+    const product = await Product.findById(productId).select('stock').lean();
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+    if (typeof product.stock === 'number' && quantity > product.stock) {
+      return res.status(400).json({ success: false, message: `Only ${product.stock} in stock` });
+    }
+
+    const updated = await Cart.findOneAndUpdate(
+      { customer: req.customer._id, 'items.product': productId },
+      { $set: { 'items.$.quantity': quantity } },
+      { new: true },
+    );
+    if (!updated) return res.status(404).json({ success: false, message: 'Item not found in cart' });
 
     res.json({ success: true });
   } catch (err) { next(err); }

@@ -11,6 +11,7 @@ const productSchema = new mongoose.Schema({
   sku:           { type: String, required: true, unique: true, trim: true, uppercase: true },
   price:         { type: Number, required: true, min: 0 },
   discountPrice: { type: Number, default: null, min: 0 },
+  gstRate:       { type: Number, default: null, min: 0, max: 100 }, // null = fall back to StoreSettings.orders.gstRate
   stock:         { type: Number, required: true, default: 0, min: 0 },
   alertLevel:    { type: Number, default: 10 },
   images:        [{ type: String }],
@@ -25,6 +26,36 @@ const productSchema = new mongoose.Schema({
   soldCount:     { type: Number, default: 0 },
   rating:        { type: Number, default: 0 },
   reviewCount:   { type: Number, default: 0 },
+
+  // Seller-toggleable checkout add-on: gift wrapping for this product.
+  giftWrap: {
+    enabled: { type: Boolean, default: false },
+    price:   { type: Number, default: 0, min: 0 },
+  },
+
+  // Seller-toggleable checkout upsell: "buy this + product Y for a bundle price".
+  // Surfaced on the checkout page as an optional add-on toggle.
+  bundleOffer: {
+    enabled:      { type: Boolean, default: false },
+    withProduct:  { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    bundlePrice:  { type: Number, default: null, min: 0 }, // combined price when both are bought together
+  },
+
+  // Moderation — separate axis from `status`. `status` still controls
+  // storefront visibility exactly as before; a product only ever reaches
+  // status:'active' for the first time once moderationStatus reaches
+  // 'approved' or 'ai_approved' (see vendorPortal.controller.js createProduct).
+  moderationStatus: {
+    type: String,
+    enum: ['pending', 'ai_approved', 'flagged', 'approved', 'rejected'],
+    default: 'pending',
+  },
+  moderationNote: { type: String, default: '' }, // AI flag reason or admin rejection reason
+  aiReview: {
+    checkedAt:  { type: Date, default: null },
+    confidence: { type: Number, default: null, min: 0, max: 1 },
+    raw:        { type: String, default: '' }, // full AI response text, for admin/debug visibility
+  },
 }, { timestamps: true });
 
 productSchema.virtual('stockStatus').get(function () {
@@ -42,6 +73,7 @@ productSchema.index({ name: 'text', sku: 'text', brand: 'text', author: 'text' }
 productSchema.index({ category: 1, status: 1 });
 productSchema.index({ vendor: 1, status: 1 });
 productSchema.index({ stock: 1 });
+productSchema.index({ moderationStatus: 1, createdAt: -1 });
 
 // Default-connection model — the single shared `ecom.Product` collection,
 // preserved for any request that doesn't resolve to a tenant subdomain.

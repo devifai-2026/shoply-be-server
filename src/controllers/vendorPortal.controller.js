@@ -4,9 +4,14 @@ const { getOrderModel } = require('../models/Order');
 const { getVendorModel } = require('../models/Vendor');
 const { getWithdrawalRequestModel } = require('../models/WithdrawalRequest');
 const { getAdminNotificationModel } = require('../models/AdminNotification');
+const { getStoreSettingsModel } = require('../models/StoreSettings');
 const shiprocket = require('../services/shiprocket.service');
 const delhivery  = require('../services/delhivery.service');
+const invoiceService = require('../services/invoice.service');
+const aiReviewService = require('../services/aiReview.service');
 const { rollupOrderStatus } = require('../utils/orderStatusRollup');
+const { isAiReviewEnabled } = require('../utils/tenantAddons');
+const { notifyAdmin } = require('../utils/notify');
 
 // Turn uploaded files into server-relative URLs (served from /uploads)
 exports.uploadImages = async (req, res, next) => {
@@ -45,20 +50,64 @@ exports.listProducts = async (req, res, next) => {
 exports.createProduct = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
+    const Vendor  = getVendorModel(req.tenantConn);
     const body = { ...req.body };
     body.vendor = req.vendor._id;   // ownership is never client-chosen
-    body.status = 'draft';          // vendor listings go live only when published
     delete body.soldCount; delete body.rating; delete body.reviewCount;
+    delete body.moderationStatus; delete body.moderationNote; delete body.aiReview; // never client-chosen
+
+    const vendor = await Vendor.findById(req.vendor._id).select('autoApprove').lean();
+    body.status = 'draft';           // vendor listings go live only when published/approved
+    body.moderationStatus = 'pending';
+    if (vendor?.autoApprove) {
+      body.status = 'active';
+      body.moderationStatus = 'approved';
+    }
+
     const product = await Product.create(body);
     res.status(201).json({ success: true, data: product });
+
+    // AI review is a premium, PO-gated add-on — always runs when enabled,
+    // even for auto-approved vendors (confirmed: acts as a safety net and
+    // can pull an already-live listing back). Fire-and-forget: never
+    // blocks or delays the vendor's own create-product response.
+    if (isAiReviewEnabled(req.tenant)) {
+      aiReviewService.reviewProduct(product, {
+        tenantConn: req.tenantConn,
+        tenantSlug: req.tenant?.slug,
+        wasAutoApproved: !!vendor?.autoApprove,
+      }).catch(err => console.error('[AIReview] failed for product', product._id, err.message));
+    }
   } catch (err) { next(err); }
 };
+
+// Fields whose change should re-trigger moderation — a vendor could
+// otherwise get one product approved and then silently swap in different,
+// never-reviewed content under the same _id.
+const MODERATION_SENSITIVE_FIELDS = ['name', 'description', 'images', 'category'];
 
 exports.updateProduct = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
+    const Vendor  = getVendorModel(req.tenantConn);
     const body = { ...req.body };
     delete body.vendor; delete body.soldCount; delete body.rating; delete body.reviewCount;
+    delete body.moderationStatus; delete body.moderationNote; delete body.aiReview; // never client-chosen
+
+    const existing = await Product.findOne({ _id: req.params.id, vendor: req.vendor._id })
+      .select('status moderationStatus vendor').lean();
+    if (!existing) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    const vendor = await Vendor.findById(req.vendor._id).select('autoApprove').lean();
+    const touchesSensitiveField = MODERATION_SENSITIVE_FIELDS.some(f => body[f] !== undefined);
+    // Only re-queue for review if it was already approved and isn't exempt
+    // via auto-approve — don't yank a live listing just for a typo fix,
+    // the NEXT bulk-approve/AI pass re-confirms it (see plan 0.3).
+    if (touchesSensitiveField && !vendor?.autoApprove &&
+        ['approved', 'ai_approved'].includes(existing.moderationStatus)) {
+      body.moderationStatus = 'pending';
+    }
+
     const product = await Product.findOneAndUpdate(
       { _id: req.params.id, vendor: req.vendor._id },
       body,
@@ -66,6 +115,14 @@ exports.updateProduct = async (req, res, next) => {
     );
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     res.json({ success: true, data: product });
+
+    if (touchesSensitiveField && body.moderationStatus === 'pending' && isAiReviewEnabled(req.tenant)) {
+      aiReviewService.reviewProduct(product, {
+        tenantConn: req.tenantConn,
+        tenantSlug: req.tenant?.slug,
+        wasAutoApproved: false,
+      }).catch(err => console.error('[AIReview] failed for product', product._id, err.message));
+    }
   } catch (err) { next(err); }
 };
 
@@ -104,6 +161,33 @@ exports.getSubOrder = async (req, res, next) => {
       .populate('order', 'orderNumber shippingAddress paymentMethod paymentStatus customer createdAt');
     if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
     res.json({ success: true, data: subOrder });
+  } catch (err) { next(err); }
+};
+
+// GET /vendor/orders/:id/invoice — PDF invoice for just this vendor's slice
+// of a (possibly multi-vendor) order, using the vendor's own GSTIN/toggle.
+exports.getSubOrderInvoice = async (req, res, next) => {
+  try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+    const subOrder = await SubOrder.findOne({ _id: req.params.id, vendor: req.vendor._id })
+      .populate('order', 'orderNumber invoiceNumber shippingAddress discount bundleSavings createdAt customer')
+      .lean();
+    if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    const storeSettings = await StoreSettings.findOne({ storeId: 'default' }).select('general').lean();
+    const docDefinition = invoiceService.buildInvoiceDocDefinition({
+      order: subOrder.order,
+      scope: subOrder,
+      seller: req.vendor,
+      customer: subOrder.order?.customer,
+      storeSettings,
+    });
+    const pdfBuffer = await invoiceService.renderPdfBuffer(docDefinition);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${subOrder.subNumber}.pdf"`);
+    res.send(pdfBuffer);
   } catch (err) { next(err); }
 };
 
@@ -281,8 +365,7 @@ exports.requestWithdrawal = async (req, res, next) => {
 
     const request = await WithdrawalRequest.create({ vendor: vendorId, amount: amt });
 
-    const AdminNotification = getAdminNotificationModel(req.tenantConn);
-    await AdminNotification.create({
+    await notifyAdmin(req.tenantConn, req.tenant?.slug, {
       type:    'withdrawal',
       title:   'New Withdrawal Request',
       message: `${req.vendor.storeName} requested a withdrawal of ₹${amt}`,

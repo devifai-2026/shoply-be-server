@@ -9,6 +9,17 @@ const orderItemSchema = new mongoose.Schema({
   price:        { type: Number, required: true },
   discountPrice: { type: Number, default: null },
   attributes:   { type: Map, of: String, default: {} },
+  gstRate:      { type: Number, default: 0 },   // % applied to this line at order time (snapshot)
+  gstAmount:    { type: Number, default: 0 },   // ₹ tax for this line (price * quantity * gstRate/100)
+  giftWrap: {
+    selected: { type: Boolean, default: false },
+    price:    { type: Number, default: 0 },     // snapshot of Product.giftWrap.price at order time
+  },
+  bundleOffer: {
+    selected:     { type: Boolean, default: false },
+    withProduct:  { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    bundlePrice:  { type: Number, default: null }, // snapshot combined price when accepted
+  },
 }, { _id: true });
 
 const timelineEventSchema = new mongoose.Schema({
@@ -25,6 +36,8 @@ const orderSchema = new mongoose.Schema({
   shippingCost: { type: Number, default: 0 },
   discount:     { type: Number, default: 0 },
   tax:          { type: Number, default: 0 },
+  giftWrapTotal: { type: Number, default: 0 },
+  bundleSavings: { type: Number, default: 0 }, // discount realized from accepted bundle offers
   total:        { type: Number, required: true },
   couponCode:   { type: String, default: null },
   platform:     { type: String, enum: ['Web', 'App'], default: 'Web' },
@@ -51,6 +64,9 @@ const orderSchema = new mongoose.Schema({
     state:   { type: String },
     pincode: { type: String },
     country: { type: String, default: 'India' },
+    lat:     { type: Number, default: null }, // Places/Geocoding-verified coordinates
+    lng:     { type: Number, default: null },
+    placeId: { type: String, default: null }, // Google Places place_id, for audit/re-lookup
   },
   notes:    { type: String, default: '' },
   timeline: [timelineEventSchema],

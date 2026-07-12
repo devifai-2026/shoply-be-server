@@ -3,6 +3,8 @@ const { getCourierModel }       = require('../models/Courier');
 const { getStoreSettingsModel } = require('../models/StoreSettings');
 const { getOrderModel }         = require('../models/Order');
 const { getSubOrderModel }      = require('../models/SubOrder');
+const { getVendorModel }        = require('../models/Vendor');
+const { getProductModel }       = require('../models/Product');
 const shiprocket    = require('../services/shiprocket.service');
 const delhivery     = require('../services/delhivery.service');
 const pricing       = require('../services/pricing.service');
@@ -164,19 +166,68 @@ exports.getStats = async (req, res, next) => {
 
 // ─── Internal rate calculator (used at checkout) ─────────────────────────────
 
+// POST /calculate-rate — body: { pincode, total, weight, items? }
+// `items` (optional): [{ productId, quantity }] — when supplied, the quote
+// splits by vendor (using each vendor's shippingSettings override) and sums
+// the parts, so the checkout-page estimate matches what order creation will
+// actually charge instead of only ever quoting the global zone rate.
 exports.calculateRate = async (req, res, next) => {
   try {
-    const { pincode, total, weight } = req.body;
-    const { rate, zone, estimatedDays } = await pricing.computeShipping({
-      pincode,
-      merchandiseTotal: total,
-      weight,
-    });
+    const { pincode, total, weight, items } = req.body;
+
+    if (!Array.isArray(items) || !items.length) {
+      const { rate, zone, estimatedDays } = await pricing.computeShipping({
+        pincode,
+        merchandiseTotal: total,
+        weight,
+      });
+      return res.json({
+        success: true,
+        data: rate === 0
+          ? { rate, message: 'Free shipping', zone, estimatedDays }
+          : { rate, zone, estimatedDays },
+      });
+    }
+
+    const Product = getProductModel(req.tenantConn);
+    const Vendor  = getVendorModel(req.tenantConn);
+    const products = await Product.find({ _id: { $in: items.map(i => i.productId) } })
+      .select('vendor price discountPrice').lean();
+    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
+
+    const vendorGroups = new Map();
+    const storeOwned = [];
+    for (const item of items) {
+      const p = productMap[item.productId];
+      if (!p) continue;
+      const lineTotal = (p.discountPrice || p.price) * (item.quantity || 1);
+      const vendorId = p.vendor?.toString();
+      if (!vendorId) { storeOwned.push(lineTotal); continue; }
+      vendorGroups.set(vendorId, (vendorGroups.get(vendorId) || 0) + lineTotal);
+    }
+
+    const vendors = vendorGroups.size
+      ? await Vendor.find({ _id: { $in: [...vendorGroups.keys()] } }).select('storeName shippingSettings').lean()
+      : [];
+    const vendorMap = Object.fromEntries(vendors.map(v => [v._id.toString(), v]));
+
+    const [storeResult, ...vendorResults] = await Promise.all([
+      storeOwned.length || !vendorGroups.size
+        ? pricing.computeShipping({ pincode, merchandiseTotal: storeOwned.reduce((s, v) => s + v, 0), weight })
+        : Promise.resolve({ rate: 0, zone: null, estimatedDays: null }),
+      ...[...vendorGroups.entries()].map(([vendorId, vendorTotal]) =>
+        pricing.computeVendorShipping({ vendor: vendorMap[vendorId], pincode, merchandiseTotal: vendorTotal })
+      ),
+    ]);
+
+    const rate = Math.round((storeResult.rate + vendorResults.reduce((s, r) => s + r.rate, 0)) * 100) / 100;
     res.json({
       success: true,
-      data: rate === 0
-        ? { rate, message: 'Free shipping', zone, estimatedDays }
-        : { rate, zone, estimatedDays },
+      data: {
+        rate,
+        message: rate === 0 ? 'Free shipping' : undefined,
+        breakdown: [storeResult, ...vendorResults].filter(r => r.zone),
+      },
     });
   } catch (err) { next(err); }
 };

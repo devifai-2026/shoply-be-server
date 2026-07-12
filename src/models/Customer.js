@@ -4,14 +4,31 @@ const bcrypt   = require('bcryptjs');
 const addressSchema = new mongoose.Schema({
   label:    { type: String, default: 'Home' },
   name:     String,
-  phone:    String,
+  phone:    {
+    type: String,
+    validate: {
+      validator: v => !v || /^[6-9]\d{9}$/.test(v),
+      message: 'Phone must be a valid 10-digit Indian mobile number',
+    },
+  },
   line1:    String,
   line2:    String,
   city:     String,
   state:    String,
-  pincode:  String,
+  pincode:  {
+    type: String,
+    validate: {
+      validator: v => !v || /^[1-9]\d{5}$/.test(v),
+      message: 'Pincode must be a valid 6-digit Indian PIN code',
+    },
+  },
   country:  { type: String, default: 'India' },
   isDefault: { type: Boolean, default: false },
+  // Populated when the address was selected/verified via Google Places
+  // Autocomplete or "use current location" — absent for plain manual entry.
+  lat:     { type: Number, default: null },
+  lng:     { type: Number, default: null },
+  placeId: { type: String, default: null },
 }, { _id: true });
 
 const customerSchema = new mongoose.Schema({

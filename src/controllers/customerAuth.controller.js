@@ -192,21 +192,24 @@ exports.getAddresses = async (req, res, next) => {
 
 exports.addAddress = async (req, res, next) => {
   try {
-    const { label, name, phone, line1, line2, city, state, pincode, country, isDefault } = req.body;
+    const { label, name, phone, line1, line2, city, state, pincode, country, isDefault, lat, lng, placeId } = req.body;
     const Customer = getCustomerModel(req.tenantConn);
 
     const customer = await Customer.findById(req.customer._id);
-    
+
     // If setting as default, unset others
     if (isDefault) {
       customer.addresses.forEach(addr => addr.isDefault = false);
     }
-    
+
     // If first address, make it default
-    const newAddress = { 
-      label, name, phone, line1, line2, city, state, pincode, 
-      country: country || 'India', 
-      isDefault: customer.addresses.length === 0 ? true : !!isDefault 
+    const newAddress = {
+      label, name, phone, line1, line2, city, state, pincode,
+      country: country || 'India',
+      isDefault: customer.addresses.length === 0 ? true : !!isDefault,
+      lat: typeof lat === 'number' ? lat : null,
+      lng: typeof lng === 'number' ? lng : null,
+      placeId: placeId || null,
     };
     
     customer.addresses.push(newAddress);

@@ -7,9 +7,11 @@ const { getCouponModel }            = require('../models/Coupon');
 const { getAdminNotificationModel } = require('../models/AdminNotification');
 const { getStoreSettingsModel }     = require('../models/StoreSettings');
 const { getCourierModel }           = require('../models/Courier');
+const { getCounterModel, nextValue } = require('../models/Counter');
 const shiprocket        = require('../services/shiprocket.service');
 const pricing           = require('../services/pricing.service');
 const emailService      = require('../services/email.service');
+const invoiceService    = require('../services/invoice.service');
 const { rollupOrderStatus } = require('../utils/orderStatusRollup');
 
 // Books a single Shiprocket shipment for a store-owned order (no vendor
@@ -155,16 +157,44 @@ exports.createOrder = async (req, res, next) => {
     }
 
     const productIds = items.map(i => i.product);
-    const products   = await Product.find({ _id: { $in: productIds } });
+    // Also fetch any bundle "companion" products the client claims to have selected,
+    // so bundle savings can be validated against the seller's actual configuration.
+    const companionIds = items.filter(i => i.bundleOffer?.selected).map(i => i.bundleOffer.withProduct).filter(Boolean);
+    const products   = await Product.find({ _id: { $in: [...new Set([...productIds, ...companionIds])] } });
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
+    const settings    = await StoreSettings.findOne({ storeId: 'default' }).lean();
+    const storeGstRate = settings?.orders?.gstRate || 0;
+    const taxIncluded  = !!settings?.orders?.taxIncluded;
+
     let subtotal = 0;
+    let tax = 0;
+    let giftWrapTotal = 0;
+    let bundleSavings = 0;
     const orderItems = items.map(item => {
       const p = productMap[item.product];
       if (!p) throw Object.assign(new Error(`Product ${item.product} not found`), { statusCode: 404 });
       if (p.stock < item.quantity) throw Object.assign(new Error(`Insufficient stock for ${p.name}`), { statusCode: 400 });
       const price = p.discountPrice || p.price;
-      subtotal += price * item.quantity;
+      const lineSubtotal = price * item.quantity;
+      subtotal += lineSubtotal;
+
+      const { rate: gstRate, amount: gstAmount } = pricing.computeLineGst({
+        product: p, lineSubtotal, storeGstRate, taxIncluded,
+      });
+      tax += gstAmount;
+
+      const giftWrap = pricing.computeGiftWrap({ product: p, selected: !!item.giftWrap?.selected, quantity: item.quantity });
+      giftWrapTotal += giftWrap.total;
+
+      const companion = item.bundleOffer?.selected ? productMap[item.bundleOffer.withProduct] : null;
+      const bundle = pricing.computeBundleOffer({
+        product: p,
+        companionProduct: companion,
+        selected: !!item.bundleOffer?.selected && p.bundleOffer?.withProduct?.toString() === item.bundleOffer?.withProduct,
+      });
+      bundleSavings += bundle.savings;
+
       return {
         product:    p._id,
         name:       p.name,
@@ -173,12 +203,15 @@ exports.createOrder = async (req, res, next) => {
         quantity:   item.quantity,
         price,
         attributes: item.attributes || {},
+        gstRate,
+        gstAmount,
+        giftWrap: { selected: giftWrap.selected, price: giftWrap.price },
+        bundleOffer: bundle.selected
+          ? { selected: true, withProduct: item.bundleOffer.withProduct, bundlePrice: bundle.bundlePrice }
+          : { selected: false, withProduct: null, bundlePrice: null },
       };
     });
-
-    const settings    = await StoreSettings.findOne({ storeId: 'default' }).lean();
-    const taxRate     = settings?.orders?.taxIncluded ? 0 : (settings?.orders?.gstRate || 0);
-    const tax         = Math.round(subtotal * (taxRate / 100));
+    tax = Math.round(tax * 100) / 100;
 
     // Recompute the coupon discount server-side from the live subtotal —
     // never trust a discount amount sent by the client.
@@ -202,23 +235,63 @@ exports.createOrder = async (req, res, next) => {
       appliedCoupon = coupon;
     }
 
-    // Shipping is always recomputed server-side from the zone table — the
-    // client-quoted value from /calculate-rate is display-only and never trusted.
-    const { rate: shippingCost } = await pricing.computeShipping({
-      pincode:          shippingAddress.pincode,
-      merchandiseTotal: subtotal,
-    });
+    // ── Marketplace split: one sub-order per vendor ──────────────────────────
+    // Store-owned items (product.vendor = null) stay on the parent order only.
+    const vendorGroups = new Map();
+    const storeOwnedItems = [];
+    for (const item of orderItems) {
+      const vendorId = productMap[item.product.toString()]?.vendor?.toString();
+      if (!vendorId) { storeOwnedItems.push(item); continue; }
+      if (!vendorGroups.has(vendorId)) vendorGroups.set(vendorId, []);
+      vendorGroups.get(vendorId).push(item);
+    }
 
-    const total = Math.max(0, subtotal + tax + shippingCost - couponDiscount);
+    const vendors  = vendorGroups.size
+      ? await Vendor.find({ _id: { $in: [...vendorGroups.keys()] } })
+          .select('commissionRate storeName shippingSettings').lean()
+      : [];
+    const vendorMap = Object.fromEntries(vendors.map(v => [v._id.toString(), v]));
+
+    // Shipping is always recomputed server-side — the client-quoted value
+    // from /calculate-rate is display-only and never trusted. Each vendor's
+    // slice is priced independently against that vendor's own shipping
+    // settings (falling back to the global zone table); store-owned items
+    // are priced once against the global table.
+    const groupEntries = [...vendorGroups.entries()];
+    const vendorShippingResults = await Promise.all(groupEntries.map(([vendorId, vendorItems]) => {
+      const vendorSubtotal = vendorItems.reduce((s, i) => s + i.price * i.quantity, 0);
+      return pricing.computeVendorShipping({
+        vendor: vendorMap[vendorId],
+        pincode: shippingAddress.pincode,
+        merchandiseTotal: vendorSubtotal,
+      });
+    }));
+    const storeOwnedSubtotal = storeOwnedItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const { rate: storeShippingCost } = storeOwnedItems.length || !groupEntries.length
+      ? await pricing.computeShipping({ pincode: shippingAddress.pincode, merchandiseTotal: storeOwnedSubtotal })
+      : { rate: 0 };
+
+    const shippingCost = Math.round(
+      (storeShippingCost + vendorShippingResults.reduce((s, r) => s + r.rate, 0)) * 100
+    ) / 100;
+
+    const total = Math.max(0, subtotal + tax + shippingCost + giftWrapTotal - couponDiscount);
+
+    const Counter = getCounterModel(req.tenantConn);
+    const invoiceSeq = await nextValue(Counter, 'invoiceNumber', settings?.orders?.invoiceStartNumber || 1001);
+    const invoiceNumber = `${settings?.orders?.invoicePrefix || 'INV-'}${invoiceSeq}`;
 
     const order = await Order.create({
       orderNumber:    generateOrderNumber(),
+      invoiceNumber,
       customer:       customerId,
       items:          orderItems,
       subtotal,
       tax,
       shippingCost,
       discount:       couponDiscount,
+      giftWrapTotal,
+      bundleSavings,
       total,
       platform:       String(platform || '').toLowerCase() === 'app' ? 'App' : 'Web',
       shippingAddress,
@@ -227,44 +300,16 @@ exports.createOrder = async (req, res, next) => {
       timeline:       [{ status: 'pending', note: 'Order placed' }],
     });
 
-    // ── Marketplace split: one sub-order per vendor ──────────────────────────
-    // Store-owned items (product.vendor = null) stay on the parent order only.
-    const vendorGroups = new Map();
-    for (const item of orderItems) {
-      const vendorId = productMap[item.product.toString()]?.vendor?.toString();
-      if (!vendorId) continue;
-      if (!vendorGroups.has(vendorId)) vendorGroups.set(vendorId, []);
-      vendorGroups.get(vendorId).push(item);
-    }
-
     let createdSubOrders = [];
     if (vendorGroups.size) {
-      const vendors  = await Vendor.find({ _id: { $in: [...vendorGroups.keys()] } })
-        .select('commissionRate').lean();
       const rateMap  = Object.fromEntries(vendors.map(v => [v._id.toString(), v.commissionRate || 0]));
-
-      // Split the order's one flat shippingCost proportionally by each
-      // vendor's share of the order subtotal, so real per-vendor courier
-      // bookings map to real per-vendor accounting instead of one flat
-      // charge covering N independent shipments. The largest-remainder
-      // group absorbs any rounding leftover so the parts sum exactly to
-      // Order.shippingCost.
-      const groupEntries = [...vendorGroups.entries()];
-      const rawShares = groupEntries.map(([, vendorItems]) => {
-        const vendorSubtotal = vendorItems.reduce((s, i) => s + i.price * i.quantity, 0);
-        return subtotal > 0 ? (vendorSubtotal / subtotal) * shippingCost : 0;
-      });
-      const roundedShares = rawShares.map(s => Math.round(s));
-      const roundedTotal  = roundedShares.reduce((a, b) => a + b, 0);
-      const remainder     = shippingCost - roundedTotal;
-      if (remainder !== 0 && roundedShares.length) {
-        roundedShares[roundedShares.length - 1] += remainder; // last group absorbs rounding drift
-      }
 
       let seq = 0;
       const subOrders = groupEntries.map(([vendorId, vendorItems], idx) => {
         seq += 1;
         const vendorSubtotal   = vendorItems.reduce((s, i) => s + i.price * i.quantity, 0);
+        const vendorTax        = Math.round(vendorItems.reduce((s, i) => s + i.gstAmount, 0) * 100) / 100;
+        const vendorGiftWrap   = vendorItems.reduce((s, i) => s + (i.giftWrap?.selected ? i.giftWrap.price * i.quantity : 0), 0);
         const commissionRate   = rateMap[vendorId] ?? 0;
         const commissionAmount = Math.round(vendorSubtotal * commissionRate) / 100;
         return {
@@ -274,7 +319,9 @@ exports.createOrder = async (req, res, next) => {
           vendor:      vendorId,
           items:       vendorItems,
           subtotal:    vendorSubtotal,
-          shippingCost: roundedShares[idx],
+          shippingCost: Math.round(vendorShippingResults[idx].rate * 100) / 100,
+          tax:         vendorTax,
+          giftWrapTotal: vendorGiftWrap,
           commissionRate,
           commissionAmount,
           vendorEarning: Math.round((vendorSubtotal - commissionAmount) * 100) / 100,
@@ -375,6 +422,9 @@ exports.getMyOrder = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /customer/orders/:id/invoice — ?format=pdf streams a downloadable PDF,
+// otherwise returns the raw order JSON (unchanged, for any existing consumer
+// that renders its own invoice view).
 exports.getInvoice = async (req, res, next) => {
   try {
     const Order = getOrderModel(req.tenantConn);
@@ -382,7 +432,26 @@ exports.getInvoice = async (req, res, next) => {
       .populate('items.product', 'name images sku')
       .populate('customer', 'name email phone');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
-    res.json({ success: true, data: order });
+
+    if (req.query.format !== 'pdf') {
+      return res.json({ success: true, data: order });
+    }
+
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+    const storeSettings = await StoreSettings.findOne({ storeId: 'default' }).select('general orders').lean();
+
+    const docDefinition = invoiceService.buildInvoiceDocDefinition({
+      order,
+      scope: order,
+      seller: { storeName: storeSettings?.general?.storeName, gstEnabled: true },
+      customer: order.customer,
+      storeSettings,
+    });
+    const pdfBuffer = await invoiceService.renderPdfBuffer(docDefinition);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${order.invoiceNumber || order.orderNumber}.pdf"`);
+    res.send(pdfBuffer);
   } catch (err) { next(err); }
 };
 

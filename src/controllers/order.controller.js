@@ -2,8 +2,10 @@ const { getOrderModel }             = require('../models/Order');
 const { getSubOrderModel }          = require('../models/SubOrder');
 const { getCustomerModel }          = require('../models/Customer');
 const { getProductModel }           = require('../models/Product');
+const { getVendorModel }            = require('../models/Vendor');
 const { getAdminNotificationModel } = require('../models/AdminNotification');
 const { getStoreSettingsModel }     = require('../models/StoreSettings');
+const invoiceService                = require('../services/invoice.service');
 
 const generateOrderNumber = () => `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -169,6 +171,10 @@ exports.exportCSV = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /orders/:id/invoice — ?format=pdf&subOrderId=... streams a downloadable
+// PDF (the whole order, or a single vendor's slice for GST-correct
+// per-seller invoices on a marketplace order). Without ?format=pdf, returns
+// the raw JSON as before.
 exports.printInvoice = async (req, res, next) => {
   try {
     const Order = getOrderModel(req.tenantConn);
@@ -176,6 +182,36 @@ exports.printInvoice = async (req, res, next) => {
       .populate('customer', 'name email phone')
       .populate('items.product', 'name images');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
-    res.json({ success: true, data: order });
+
+    if (req.query.format !== 'pdf') {
+      return res.json({ success: true, data: order });
+    }
+
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+    const storeSettings = await StoreSettings.findOne({ storeId: 'default' }).select('general orders').lean();
+
+    let scope = order;
+    let seller = { storeName: storeSettings?.general?.storeName, gstEnabled: true };
+
+    if (req.query.subOrderId) {
+      const SubOrder = getSubOrderModel(req.tenantConn);
+      const Vendor   = getVendorModel(req.tenantConn);
+      const subOrder = await SubOrder.findOne({ _id: req.query.subOrderId, order: order._id }).lean();
+      if (!subOrder) return res.status(404).json({ success: false, message: 'Sub-order not found' });
+      const vendor = await Vendor.findById(subOrder.vendor)
+        .select('storeName gstin gstEnabled pickupAddress').lean();
+      scope = subOrder;
+      seller = vendor;
+    }
+
+    const docDefinition = invoiceService.buildInvoiceDocDefinition({
+      order, scope, seller, customer: order.customer, storeSettings,
+    });
+    const pdfBuffer = await invoiceService.renderPdfBuffer(docDefinition);
+
+    const filenameBase = scope.subNumber || order.invoiceNumber || order.orderNumber;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filenameBase}.pdf"`);
+    res.send(pdfBuffer);
   } catch (err) { next(err); }
 };

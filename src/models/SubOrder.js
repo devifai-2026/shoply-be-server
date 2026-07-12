@@ -16,10 +16,23 @@ const subOrderSchema = new mongoose.Schema({
     quantity:   Number,
     price:      Number,
     attributes: { type: Map, of: String, default: {} },
+    gstRate:    { type: Number, default: 0 },
+    gstAmount:  { type: Number, default: 0 },
+    giftWrap: {
+      selected: { type: Boolean, default: false },
+      price:    { type: Number, default: 0 },
+    },
+    bundleOffer: {
+      selected:    { type: Boolean, default: false },
+      withProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+      bundlePrice: { type: Number, default: null },
+    },
   }],
 
   subtotal:         { type: Number, required: true },
   shippingCost:     { type: Number, default: 0 }, // this vendor's proportional share of Order.shippingCost
+  tax:              { type: Number, default: 0 }, // sum of items[].gstAmount for this vendor's items
+  giftWrapTotal:    { type: Number, default: 0 },
   commissionRate:   { type: Number, required: true }, // % snapshot at order time
   commissionAmount: { type: Number, required: true },
   vendorEarning:    { type: Number, required: true }, // subtotal - commission

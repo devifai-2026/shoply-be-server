@@ -30,5 +30,6 @@ router.get('/orders',              requireApproved, portal.listSubOrders);
 router.get('/orders/:id',          requireApproved, portal.getSubOrder);
 router.patch('/orders/:id/status', requireApproved, portal.updateSubOrderStatus);
 router.get('/orders/:id/track',    requireApproved, portal.trackSubOrder);
+router.get('/orders/:id/invoice',  requireApproved, portal.getSubOrderInvoice);
 
 module.exports = router;

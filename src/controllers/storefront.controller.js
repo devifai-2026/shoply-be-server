@@ -164,6 +164,7 @@ exports.getProduct = async (req, res, next) => {
     const product = await Product.findOne({ _id: id, status: 'active', visibleWeb: true })
       .populate('category', 'name slug parent depth')
       .populate('vendor', 'storeName slug logo rating description status')
+      .populate('bundleOffer.withProduct', 'name images price discountPrice slug')
       .lean({ virtuals: true });
     if (!product || product.vendor?.status === 'suspended') {
       return res.status(404).json({ success: false, message: 'Product not found' });
