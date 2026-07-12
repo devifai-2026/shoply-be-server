@@ -32,16 +32,27 @@ const resolveCategorySlug = async (slug, CategoryModel) => {
 
 // ─── Products ────────────────────────────────────────────────────────────────
 
+// Suspended vendors' products stay in the database untouched (so reactivation
+// needs no data repair) but must not appear in storefront browsing/search —
+// existing orders/shipments for their items are unaffected, this only hides
+// new discovery.
+const excludeSuspendedVendors = async (VendorModel, filter) => {
+  const suspended = await VendorModel.find({ status: 'suspended' }).select('_id').lean();
+  if (suspended.length) filter.vendor = { $nin: suspended.map(v => v._id) };
+};
+
 exports.listProducts = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
     const Category = getCategoryModel(req.tenantConn);
+    const Vendor = getVendorModel(req.tenantConn);
 
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip  = (page - 1) * limit;
 
     const filter = { status: 'active', visibleWeb: true };
+    await excludeSuspendedVendors(Vendor, filter);
 
     // ── Category filtering (slug-based, includes all descendants) ──────────
     if (req.query.categorySlug) {
@@ -148,19 +159,24 @@ exports.getProduct = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
     const Review = getReviewModel(req.tenantConn);
+    const Vendor = getVendorModel(req.tenantConn);
     const { id } = req.params;
     const product = await Product.findOne({ _id: id, status: 'active', visibleWeb: true })
       .populate('category', 'name slug parent depth')
-      .populate('vendor', 'storeName slug logo rating description')
+      .populate('vendor', 'storeName slug logo rating description status')
       .lean({ virtuals: true });
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+    if (!product || product.vendor?.status === 'suspended') {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
 
-    const related = await Product.find({
+    const relatedFilter = {
       category: product.category?._id || product.category,
       status:   'active',
       visibleWeb: true,
       _id:      { $ne: product._id },
-    })
+    };
+    await excludeSuspendedVendors(Vendor, relatedFilter);
+    const related = await Product.find(relatedFilter)
       .limit(8)
       .lean({ virtuals: true });
 
