@@ -75,27 +75,39 @@ async function createTenant({ appName, packageName, brandName, brandLogo, mongoU
     },
   });
 
-  // Store the effective DB URI (custom or derived) encrypted.
-  const effectiveUri = mongoUri || withDbName(process.env.MONGODB_URI, dbName);
-  await TenantSecret.create({ tenant: tenant._id, slug, dbUri: effectiveUri });
+  // From here on, any failure must roll back the Tenant/TenantSecret we just
+  // created — otherwise a mid-flight error (e.g. a DB write timeout) leaves a
+  // permanently stuck 'provisioning' record that blocks reusing this slug.
+  try {
+    // Store the DB URI encrypted, exactly as supplied for custom-URI tenants.
+    // getTenantConnection() appends the tenant's own dbName at connection
+    // time (both here and on any later reconnect), so the tenant always lands
+    // in its own isolated database on that cluster rather than its default one.
+    const effectiveUri = mongoUri || withDbName(process.env.MONGODB_URI, dbName);
+    await TenantSecret.create({ tenant: tenant._id, slug, dbUri: effectiveUri });
 
-  // Seed the store-admin login inside the tenant's own database.
-  const adminEmail = `admin@${slug}.local`;
-  const adminPassword = crypto.randomBytes(9).toString('base64url');
-  const tenantConn = await getTenantConnection(slug);
-  const Admin = getAdminModel(tenantConn);
-  await Admin.create({ name: 'Store Admin', email: adminEmail, password: adminPassword, role: 'superadmin' });
-  await TenantSecret.findOneAndUpdate(
-    { tenant: tenant._id },
-    { adminEmail, adminPasswordEnc: adminPassword },
-  );
+    // Seed the store-admin login inside the tenant's own database.
+    const adminEmail = `admin@${slug}.local`;
+    const adminPassword = crypto.randomBytes(9).toString('base64url');
+    const tenantConn = await getTenantConnection(slug);
+    const Admin = getAdminModel(tenantConn);
+    await Admin.create({ name: 'Store Admin', email: adminEmail, password: adminPassword, role: 'superadmin' });
+    await TenantSecret.findOneAndUpdate(
+      { tenant: tenant._id },
+      { adminEmail, adminPasswordEnc: adminPassword },
+    );
 
-  tenant.status = 'active';
-  await tenant.save();
+    tenant.status = 'active';
+    await tenant.save();
 
-  const result = withUrls(tenant);
-  result.adminCredentials = { email: adminEmail, password: adminPassword };
-  return result;
+    const result = withUrls(tenant);
+    result.adminCredentials = { email: adminEmail, password: adminPassword };
+    return result;
+  } catch (err) {
+    await TenantSecret.deleteOne({ tenant: tenant._id }).catch(() => {});
+    await Tenant.deleteOne({ _id: tenant._id }).catch(() => {});
+    throw Object.assign(new Error(`Tenant provisioning failed and was rolled back: ${err.message}`), { statusCode: 500 });
+  }
 }
 
 // Fully removes a tenant: drops its database (if on the default cluster —
