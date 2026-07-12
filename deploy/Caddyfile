@@ -1,0 +1,75 @@
+# Ecom Multi-Vendor — Caddy on sslip.io.
+# All hosts use ON-DEMAND TLS gated by /internal/tls-check (which approves the
+# fixed platform hosts AND any real tenant subdomain). A single set of matchers
+# routes by host pattern to the right SPA. No fixed-vs-wildcard policy overlap,
+# which is what previously stopped the fixed hosts from getting certs.
+{
+	email admin@shoply.dev
+	on_demand_tls {
+		ask http://localhost:5000/internal/tls-check
+	}
+}
+
+(backend) {
+	handle /api/* {
+		reverse_proxy localhost:5000
+	}
+	handle /socket.io/* {
+		reverse_proxy localhost:5000
+	}
+	handle /uploads/* {
+		reverse_proxy localhost:5000
+	}
+}
+
+# Bare API host → straight proxy
+api.34-93-178-29.sslip.io {
+	tls {
+		on_demand
+	}
+	reverse_proxy localhost:5000
+}
+
+# Admin: fixed admin.<root> AND tenant <slug>.admin.<root> → admin SPA
+admin.34-93-178-29.sslip.io, *.admin.34-93-178-29.sslip.io {
+	tls {
+		on_demand
+	}
+	import backend
+	root * /opt/ecom/admin
+	try_files {path} /index.html
+	file_server
+}
+
+# Seller portal
+seller.34-93-178-29.sslip.io {
+	tls {
+		on_demand
+	}
+	import backend
+	root * /opt/ecom/vendor
+	try_files {path} /index.html
+	file_server
+}
+
+# PO console
+console.34-93-178-29.sslip.io {
+	tls {
+		on_demand
+	}
+	import backend
+	root * /opt/ecom/console
+	try_files {path} /index.html
+	file_server
+}
+
+# Storefront: fixed root AND tenant <slug>.<root> → client SPA (catch-all last)
+34-93-178-29.sslip.io, *.34-93-178-29.sslip.io {
+	tls {
+		on_demand
+	}
+	import backend
+	root * /opt/ecom/client
+	try_files {path} /index.html
+	file_server
+}
