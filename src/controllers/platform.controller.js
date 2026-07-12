@@ -135,6 +135,16 @@ exports.getTenant = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /platform/tenants/logo-upload — used by the "New tenant" form so the
+// owner can upload a logo file instead of pasting a URL. Returns a relative
+// URL to be sent as brandLogo when creating the tenant.
+exports.uploadTenantLogo = async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    res.json({ success: true, data: { url: `/uploads/tenants/${req.file.filename}` } });
+  } catch (err) { next(err); }
+};
+
 exports.createTenant = async (req, res, next) => {
   try {
     const tenant = await provision.createTenant(req.body);
@@ -154,6 +164,23 @@ const setStatus = (status) => async (req, res, next) => {
 };
 exports.suspendTenant    = setStatus('suspended');
 exports.reactivateTenant = setStatus('active');
+
+// Drops the tenant's database (default-cluster tenants) and removes all
+// control-plane records. Does NOT clear Caddy's cached TLS cert for the
+// tenant's subdomains — that's owned by the caddy system user, out of this
+// process's reach; clear it out-of-band (see provision.service.js comment)
+// or the subdomain's URL stays "live" (dead page, stale cert) until Caddy
+// naturally lets the cert expire.
+exports.deleteTenant = async (req, res, next) => {
+  try {
+    const deleted = await provision.deleteTenant(req.params.slug);
+    if (!deleted) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    res.json({
+      success: true,
+      message: 'Tenant deleted. Cached TLS certs for its subdomains must be cleared separately.',
+    });
+  } catch (err) { next(err); }
+};
 
 exports.rotateSecrets = async (req, res, next) => {
   try {

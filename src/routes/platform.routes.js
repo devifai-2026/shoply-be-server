@@ -2,6 +2,7 @@ const router = require('express').Router();
 const ctrl   = require('../controllers/platform.controller');
 const keystore = require('../controllers/keystore.controller');
 const { protectOwner } = require('../middleware/ownerAuth');
+const { uploadTenantLogo } = require('../middleware/upload');
 
 // Public: owner login + CI-secret endpoints (build callback + keystore material)
 router.post('/login', ctrl.login);
@@ -17,9 +18,11 @@ router.get('/analytics', ctrl.analytics);
 
 router.get('/tenants',          ctrl.listTenants);
 router.post('/tenants',         ctrl.createTenant);
+router.post('/tenants/logo-upload', uploadTenantLogo, ctrl.uploadTenantLogo);
 router.get('/tenants/:slug',    ctrl.getTenant);
 router.patch('/tenants/:slug/suspend',    ctrl.suspendTenant);
 router.patch('/tenants/:slug/reactivate', ctrl.reactivateTenant);
+router.delete('/tenants/:slug',           ctrl.deleteTenant);
 router.put('/tenants/:slug/secrets',      ctrl.rotateSecrets);
 router.get('/tenants/:slug/admin-credentials',         ctrl.getAdminCredentials);
 router.post('/tenants/:slug/admin-credentials/rotate', ctrl.rotateAdminCredentials);

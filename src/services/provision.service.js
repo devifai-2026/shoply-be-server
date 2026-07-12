@@ -92,7 +92,40 @@ async function createTenant({ appName, packageName, brandName, brandLogo, mongoU
 
   tenant.status = 'active';
   await tenant.save();
-  return withUrls(tenant);
+
+  const result = withUrls(tenant);
+  result.adminCredentials = { email: adminEmail, password: adminPassword };
+  return result;
 }
 
-module.exports = { createTenant, tenantUrls, withUrls };
+// Fully removes a tenant: drops its database (if on the default cluster —
+// custom-URI tenants own their own external cluster, so we only disconnect,
+// never drop someone else's database), then removes its control-plane
+// records. Does NOT touch Caddy's cached TLS certs for the tenant's
+// subdomains — those are owned by the caddy system user and must be cleared
+// out-of-band (delete the cert dir under
+// /var/lib/caddy/.local/share/caddy/certificates/... and restart caddy), or
+// the subdomain keeps resolving to a dead/stale cert until Caddy's own
+// on-demand re-check eventually rejects it.
+async function deleteTenant(slug) {
+  const { BuildJob } = require('../models/control');
+  const { getTenantConnection, invalidate } = require('../config/tenantDb');
+
+  const tenant = await Tenant.findOne({ slug });
+  if (!tenant) return false;
+
+  const conn = await getTenantConnection(slug);
+  if (conn && tenant.dbOnDefaultCluster) {
+    await conn.dropDatabase();
+  } else if (conn) {
+    await conn.close();
+  }
+  invalidate(slug);
+
+  await TenantSecret.deleteOne({ tenant: tenant._id });
+  await BuildJob.deleteMany({ tenant: slug });
+  await Tenant.deleteOne({ _id: tenant._id });
+  return true;
+}
+
+module.exports = { createTenant, deleteTenant, tenantUrls, withUrls };
