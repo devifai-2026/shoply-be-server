@@ -3,6 +3,7 @@ const { Tenant, TenantSecret } = require('../models/control');
 const { withDbName } = require('../config/controlDb');
 const { getTenantConnection } = require('../config/tenantDb');
 const { getAdminModel } = require('../models/Admin');
+const { getStoreSettingsModel } = require('../models/StoreSettings');
 
 const publicDomain = () =>
   process.env.SAAS_PUBLIC_DOMAIN
@@ -95,6 +96,16 @@ async function createTenant({ appName, packageName, brandName, brandLogo, mongoU
     await TenantSecret.findOneAndUpdate(
       { tenant: tenant._id },
       { adminEmail, adminPasswordEnc: adminPassword },
+    );
+
+    // Seed StoreSettings.general.storeName with the tenant's own brand name,
+    // so the storefront shows it from the start instead of the schema's
+    // generic "MyShop"/"My Store" fallback.
+    const StoreSettings = getStoreSettingsModel(tenantConn);
+    await StoreSettings.findOneAndUpdate(
+      { storeId: 'default' },
+      { $setOnInsert: { storeId: 'default' }, $set: { 'general.storeName': tenant.name } },
+      { upsert: true },
     );
 
     tenant.status = 'active';
