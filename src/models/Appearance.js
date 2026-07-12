@@ -89,6 +89,18 @@ const appearanceSchema = new mongoose.Schema({
       ],
       validate: { validator: (v) => v.length <= 5, message: 'Maximum 5 banners allowed' },
     },
+    // Admin-editable "Shop by Category/Activity" homepage tile row — replaces
+    // any hardcoded per-tenant content (was previously static outdoor-gear
+    // placeholder tiles, which didn't make sense for a non-outdoor store).
+    categoryTiles: {
+      type: [{
+        label: { type: String, default: '' },
+        link:  { type: String, default: '/products' },
+        image: { type: String, default: null },
+      }],
+      default: [],
+      validate: { validator: (v) => v.length <= 6, message: 'Maximum 6 tiles allowed' },
+    },
   },
 
   productCardStyle: { type: String, default: 'minimal' },

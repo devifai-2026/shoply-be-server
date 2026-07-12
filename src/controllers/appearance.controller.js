@@ -127,3 +127,20 @@ exports.uploadBannerImage = async (req, res, next) => {
     res.json({ success: true, data: { image: url }, appearance });
   } catch (err) { next(err); }
 };
+
+exports.uploadCategoryTileImage = async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const index = parseInt(req.params.index, 10);
+    if (isNaN(index) || index < 0 || index > 5)
+      return res.status(400).json({ success: false, message: 'Invalid tile index (0–5)' });
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const url = `/uploads/banners/${req.file.filename}`;
+    const appearance = await Appearance.findOneAndUpdate(
+      { storeId: 'default' },
+      { $set: { [`homepageContent.categoryTiles.${index}.image`]: url } },
+      { new: true, upsert: true }
+    );
+    res.json({ success: true, data: { image: url }, appearance });
+  } catch (err) { next(err); }
+};

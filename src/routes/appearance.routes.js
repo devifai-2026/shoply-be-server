@@ -19,5 +19,6 @@ router.post('/logo',         uploadLogo,    ctrl.uploadLogo);
 router.post('/favicon',      uploadFavicon, ctrl.uploadFavicon);
 router.post('/appicon',      uploadAppIcon, ctrl.uploadAppIcon);
 router.post('/banner/:index', uploadBanner,  ctrl.uploadBannerImage);
+router.post('/category-tile/:index', uploadBanner, ctrl.uploadCategoryTileImage);
 
 module.exports = router;
