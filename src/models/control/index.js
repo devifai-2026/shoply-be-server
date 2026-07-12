@@ -40,9 +40,11 @@ const encField = {
   set: (v) => encrypt(v),
 };
 const tenantSecretSchema = new Schema({
-  tenant: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true },
-  slug:   { type: String, required: true },
-  dbUri:  encField, // full per-tenant Mongo URI when dbOnDefaultCluster = false
+  tenant:           { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true },
+  slug:             { type: String, required: true },
+  dbUri:            encField, // full per-tenant Mongo URI when dbOnDefaultCluster = false
+  adminEmail:       { type: String, default: '' }, // store-admin login identifier (not secret)
+  adminPasswordEnc: encField,                       // store-admin password, encrypted
 }, { timestamps: true });
 tenantSecretSchema.methods.decrypted = function (field) {
   return decrypt(this[field]);

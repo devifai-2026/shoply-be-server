@@ -9,6 +9,7 @@ const { errorHandler, notFound } = require('./middleware/errorHandler');
 const routes                     = require('./routes');
 const metrics                    = require('./utils/metrics');
 const platformRoutes             = require('./routes/platform.routes');
+const tenantContext              = require('./middleware/tenantContext');
 
 const app = express();
 
@@ -33,6 +34,10 @@ if (process.env.NODE_ENV !== 'test') app.use(morgan('dev'));
 // Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Resolves req.tenant/req.tenantConn from the request's hostname (tenant
+// subdomains only — platform hosts and unmatched hosts no-op).
+app.use(tenantContext);
 
 // Rate limiting
 const limiter = rateLimit({ 

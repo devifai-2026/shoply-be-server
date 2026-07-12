@@ -1,9 +1,12 @@
+const crypto = require('crypto');
 const { Tenant, TenantSecret, BuildJob, OwnerUser } = require('../models/control');
 const { signOwnerToken } = require('../middleware/ownerAuth');
 const provision   = require('../services/provision.service');
 const buildDispatch = require('../services/buildDispatch.service');
 const buildArtifacts = require('../services/buildArtifacts.service');
 const metrics     = require('../utils/metrics');
+const { getTenantConnection, invalidate: invalidateTenantConn } = require('../config/tenantDb');
+const { getAdminModel } = require('../models/Admin');
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -164,7 +167,55 @@ exports.rotateSecrets = async (req, res, next) => {
     );
     tenant.dbOnDefaultCluster = !mongoUri;
     await tenant.save();
+    invalidateTenantConn(tenant.slug);
     res.json({ success: true, message: 'Tenant DB URI rotated' });
+  } catch (err) { next(err); }
+};
+
+// GET /platform/tenants/:slug/admin-credentials — reveal the store-admin login.
+exports.getAdminCredentials = async (req, res, next) => {
+  try {
+    const tenant = await Tenant.findOne({ slug: req.params.slug });
+    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    const secret = await TenantSecret.findOne({ tenant: tenant._id });
+    if (!secret || !secret.adminEmail) {
+      return res.status(404).json({ success: false, message: 'No admin credentials on record for this tenant' });
+    }
+    res.json({
+      success: true,
+      data: { email: secret.adminEmail, password: secret.decrypted('adminPasswordEnc') },
+    });
+  } catch (err) { next(err); }
+};
+
+// POST /platform/tenants/:slug/admin-credentials/rotate — generate (or create,
+// if none exists yet) the store-admin login and return the plaintext once.
+exports.rotateAdminCredentials = async (req, res, next) => {
+  try {
+    const tenant = await Tenant.findOne({ slug: req.params.slug });
+    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+
+    const secret = await TenantSecret.findOne({ tenant: tenant._id });
+    const email = secret?.adminEmail || `admin@${tenant.slug}.local`;
+    const newPassword = crypto.randomBytes(9).toString('base64url');
+
+    const conn = await getTenantConnection(tenant.slug);
+    const Admin = getAdminModel(conn);
+    let admin = await Admin.findOne({ email });
+    if (admin) { admin.password = newPassword; await admin.save(); }
+    else { admin = await Admin.create({ name: 'Store Admin', email, password: newPassword, role: 'superadmin' }); }
+
+    await TenantSecret.findOneAndUpdate(
+      { tenant: tenant._id },
+      { slug: tenant.slug, adminEmail: email, adminPasswordEnc: newPassword },
+      { upsert: true },
+    );
+
+    res.json({
+      success: true,
+      data: { email, password: newPassword },
+      message: 'Admin credentials rotated — shown only once',
+    });
   } catch (err) { next(err); }
 };
 

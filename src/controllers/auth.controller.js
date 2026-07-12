@@ -1,8 +1,8 @@
 const jwt   = require('jsonwebtoken');
-const Admin = require('../models/Admin');
+const { getAdminModel } = require('../models/Admin');
 
-const signToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+const signToken = (id, slug) =>
+  jwt.sign({ id, slug: slug || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 
 exports.login = async (req, res, next) => {
   try {
@@ -10,6 +10,7 @@ exports.login = async (req, res, next) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
+    const Admin = getAdminModel(req.tenantConn);
     const admin = await Admin.findOne({ email }).select('+password');
     if (!admin || !(await admin.matchPassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -17,7 +18,7 @@ exports.login = async (req, res, next) => {
     if (!admin.isActive) {
       return res.status(403).json({ success: false, message: 'Account is disabled' });
     }
-    const token = signToken(admin._id);
+    const token = signToken(admin._id, req.tenant?.slug);
     res.json({ success: true, token, admin });
   } catch (err) { next(err); }
 };
@@ -33,6 +34,7 @@ exports.logout = (_req, res) => {
 exports.changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    const Admin = getAdminModel(req.tenantConn);
     const admin = await Admin.findById(req.admin._id).select('+password');
     if (!(await admin.matchPassword(currentPassword))) {
       return res.status(400).json({ success: false, message: 'Current password is incorrect' });

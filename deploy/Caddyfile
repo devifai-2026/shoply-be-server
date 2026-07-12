@@ -30,15 +30,24 @@ api.34-93-178-29.sslip.io {
 	reverse_proxy localhost:5000
 }
 
+# SPA serving must live inside a handle block: try_files is a rewrite, which
+# Caddy orders BEFORE handle — left bare, it rewrites /api/* to /index.html
+# before the backend proxy handles can match.
+(spa) {
+	handle {
+		root * {args[0]}
+		try_files {path} /index.html
+		file_server
+	}
+}
+
 # Admin: fixed admin.<root> AND tenant <slug>.admin.<root> → admin SPA
 admin.34-93-178-29.sslip.io, *.admin.34-93-178-29.sslip.io {
 	tls {
 		on_demand
 	}
 	import backend
-	root * /opt/ecom/admin
-	try_files {path} /index.html
-	file_server
+	import spa /opt/ecom/admin
 }
 
 # Seller portal
@@ -47,9 +56,7 @@ seller.34-93-178-29.sslip.io {
 		on_demand
 	}
 	import backend
-	root * /opt/ecom/vendor
-	try_files {path} /index.html
-	file_server
+	import spa /opt/ecom/vendor
 }
 
 # PO console
@@ -58,9 +65,7 @@ console.34-93-178-29.sslip.io {
 		on_demand
 	}
 	import backend
-	root * /opt/ecom/console
-	try_files {path} /index.html
-	file_server
+	import spa /opt/ecom/console
 }
 
 # Storefront: fixed root AND tenant <slug>.<root> → client SPA (catch-all last)
@@ -69,7 +74,5 @@ console.34-93-178-29.sslip.io {
 		on_demand
 	}
 	import backend
-	root * /opt/ecom/client
-	try_files {path} /index.html
-	file_server
+	import spa /opt/ecom/client
 }

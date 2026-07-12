@@ -1,5 +1,8 @@
+const crypto = require('crypto');
 const { Tenant, TenantSecret } = require('../models/control');
 const { withDbName } = require('../config/controlDb');
+const { getTenantConnection } = require('../config/tenantDb');
+const { getAdminModel } = require('../models/Admin');
 
 const publicDomain = () =>
   process.env.SAAS_PUBLIC_DOMAIN
@@ -75,6 +78,17 @@ async function createTenant({ appName, packageName, brandName, brandLogo, mongoU
   // Store the effective DB URI (custom or derived) encrypted.
   const effectiveUri = mongoUri || withDbName(process.env.MONGODB_URI, dbName);
   await TenantSecret.create({ tenant: tenant._id, slug, dbUri: effectiveUri });
+
+  // Seed the store-admin login inside the tenant's own database.
+  const adminEmail = `admin@${slug}.local`;
+  const adminPassword = crypto.randomBytes(9).toString('base64url');
+  const tenantConn = await getTenantConnection(slug);
+  const Admin = getAdminModel(tenantConn);
+  await Admin.create({ name: 'Store Admin', email: adminEmail, password: adminPassword, role: 'superadmin' });
+  await TenantSecret.findOneAndUpdate(
+    { tenant: tenant._id },
+    { adminEmail, adminPasswordEnc: adminPassword },
+  );
 
   tenant.status = 'active';
   await tenant.save();

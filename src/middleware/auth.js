@@ -1,5 +1,5 @@
 const jwt   = require('jsonwebtoken');
-const Admin = require('../models/Admin');
+const { getAdminModel } = require('../models/Admin');
 
 const protect = async (req, res, next) => {
   try {
@@ -9,6 +9,13 @@ const protect = async (req, res, next) => {
     }
     const token   = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Reject only when both sides carry a slug and they disagree — tokens
+    // issued before this change have no slug claim and stay valid against the
+    // default connection.
+    if (decoded.slug && req.tenant && decoded.slug !== req.tenant.slug) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const Admin   = getAdminModel(req.tenantConn);
     const admin   = await Admin.findById(decoded.id);
     if (!admin || !admin.isActive) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });

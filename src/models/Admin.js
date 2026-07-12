@@ -26,4 +26,18 @@ adminSchema.methods.toJSON = function () {
   return obj;
 };
 
-module.exports = mongoose.model('Admin', adminSchema);
+// Default-connection model — the single shared `ecom.Admin` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const AdminDefault = mongoose.model('Admin', adminSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Admin' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getAdminModel(conn) {
+  if (!conn) return AdminDefault;
+  return conn.models.Admin || conn.model('Admin', adminSchema);
+}
+
+module.exports = AdminDefault;
+module.exports.getAdminModel = getAdminModel;
