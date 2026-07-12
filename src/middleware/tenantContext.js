@@ -5,14 +5,14 @@ const ROOT = (process.env.SAAS_PUBLIC_DOMAIN || '').toLowerCase();
 const FIXED_PREFIXES = ['', 'admin.', 'seller.', 'console.', 'api.'];
 
 // Same slug-extraction logic as app.js's /internal/tls-check: pulls the slug
-// out of <slug>.<root> or <slug>.admin.<root>; returns null for fixed platform
-// hosts or anything that isn't a tenant subdomain.
+// out of <slug>.<root>, <slug>.admin.<root>, or <slug>.seller.<root>; returns
+// null for fixed platform hosts or anything that isn't a tenant subdomain.
 function extractSlug(host) {
   if (!host || !ROOT) return null;
   const h = host.toLowerCase();
   if (FIXED_PREFIXES.some((p) => `${p}${ROOT}` === h)) return null;
   if (!h.endsWith(`.${ROOT}`)) return null;
-  const label = h.slice(0, -1 * `.${ROOT}`.length).replace(/\.admin$/, '');
+  const label = h.slice(0, -1 * `.${ROOT}`.length).replace(/\.(admin|seller)$/, '');
   return label.split('.')[0] || null;
 }
 

@@ -50,8 +50,8 @@ admin.34-93-178-29.sslip.io, *.admin.34-93-178-29.sslip.io {
 	import spa /opt/ecom/admin
 }
 
-# Seller portal
-seller.34-93-178-29.sslip.io {
+# Seller portal: fixed seller.<root> AND tenant <slug>.seller.<root> → vendor SPA
+seller.34-93-178-29.sslip.io, *.seller.34-93-178-29.sslip.io {
 	tls {
 		on_demand
 	}

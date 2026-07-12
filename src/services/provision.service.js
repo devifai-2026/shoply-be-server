@@ -16,9 +16,10 @@ const tenantUrls = (tenant) => {
   const base = publicDomain();
   const proto = base.includes('localhost') ? 'http' : 'https';
   return {
-    store: `${proto}://${tenant.slug}.${base}`,
-    admin: `${proto}://${tenant.slug}.admin.${base}`,
-    api:   `${proto}://api.${base}`,
+    store:  `${proto}://${tenant.slug}.${base}`,
+    admin:  `${proto}://${tenant.slug}.admin.${base}`,
+    seller: `${proto}://${tenant.slug}.seller.${base}`,
+    api:    `${proto}://api.${base}`,
   };
 };
 

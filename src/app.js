@@ -73,8 +73,9 @@ app.get('/internal/tls-check', async (req, res) => {
     if (fixed.includes(host)) return res.sendStatus(200);
 
     if (host.endsWith(`.${root}`)) {
-      // slug is the left-most label of <slug>.<root> or <slug>.admin.<root>
-      const label = host.slice(0, -1 * (`.${root}`).length).replace(/\.admin$/, '');
+      // slug is the left-most label of <slug>.<root>, <slug>.admin.<root>, or
+      // <slug>.seller.<root>
+      const label = host.slice(0, -1 * (`.${root}`).length).replace(/\.(admin|seller)$/, '');
       const slug = label.split('.')[0];
       const { Tenant } = require('./models/control');
       if (await Tenant.exists({ slug, status: { $ne: 'deleted' } })) return res.sendStatus(200);
