@@ -1,7 +1,8 @@
-const Coupon = require('../models/Coupon');
+const { getCouponModel } = require('../models/Coupon');
 
 exports.list = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const filter = {};
     if (req.query.status) filter.status = req.query.status;
     const coupons = await Coupon.find(filter).sort({ createdAt: -1 });
@@ -11,6 +12,7 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const coupon = await Coupon.findById(req.params.id)
       .populate('products', 'name sku')
       .populate('categories', 'name');
@@ -21,6 +23,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const coupon = await Coupon.create(req.body);
     res.status(201).json({ success: true, data: coupon });
   } catch (err) { next(err); }
@@ -28,6 +31,7 @@ exports.create = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const coupon = await Coupon.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
     res.json({ success: true, data: coupon });
@@ -36,6 +40,7 @@ exports.update = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const coupon = await Coupon.findByIdAndDelete(req.params.id);
     if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
     res.json({ success: true, message: 'Coupon deleted' });
@@ -45,6 +50,7 @@ exports.remove = async (req, res, next) => {
 exports.validate = async (req, res, next) => {
   try {
     const { code, orderTotal, platform } = req.body;
+    const Coupon = getCouponModel(req.tenantConn);
     const coupon = await Coupon.findOne({ code: code?.toUpperCase() });
     if (!coupon) return res.status(404).json({ success: false, message: 'Invalid coupon code' });
 
@@ -65,6 +71,7 @@ exports.validate = async (req, res, next) => {
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const [active, redeemedAgg, inactive, savingsAgg] = await Promise.all([
       Coupon.countDocuments({ status: 'active' }),
       Coupon.aggregate([{ $group: { _id: null, total: { $sum: '$usageCount' } } }]),

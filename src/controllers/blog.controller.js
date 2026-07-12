@@ -1,7 +1,8 @@
-const Blog = require('../models/Blog');
+const { getBlogModel } = require('../models/Blog');
 
 exports.listPublic = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const { category, page = 1, limit = 20 } = req.query;
     const filter = { status: 'published' };
     if (category) filter.category = { $regex: category, $options: 'i' };
@@ -23,6 +24,7 @@ exports.listPublic = async (req, res, next) => {
 
 exports.getOnePublic = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const post = await Blog.findOne({ _id: req.params.id, status: 'published' })
       .select('title slug excerpt content coverImage category tags publishedAt views')
       .lean();
@@ -33,6 +35,7 @@ exports.getOnePublic = async (req, res, next) => {
 
 exports.list = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const { search, status, category, page = 1, limit = 20 } = req.query;
     const filter = {};
     if (status)   filter.status   = status;
@@ -59,6 +62,7 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const post = await Blog.findById(req.params.id).populate('author', 'name');
     if (!post) return res.status(404).json({ success: false, message: 'Blog post not found' });
     res.json({ success: true, data: post });
@@ -67,6 +71,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const data = { ...req.body };
     if (req.file) data.coverImage = `/uploads/blogs/${req.file.filename}`;
     if (data.tags && typeof data.tags === 'string') {
@@ -83,6 +88,7 @@ exports.create = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const data = { ...req.body };
     if (req.file) data.coverImage = `/uploads/blogs/${req.file.filename}`;
     if (data.tags && typeof data.tags === 'string') {
@@ -100,6 +106,7 @@ exports.update = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const Blog = getBlogModel(req.tenantConn);
     const post = await Blog.findByIdAndDelete(req.params.id);
     if (!post) return res.status(404).json({ success: false, message: 'Blog post not found' });
     res.json({ success: true, message: 'Blog post deleted' });

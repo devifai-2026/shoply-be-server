@@ -1,5 +1,5 @@
-const Cart    = require('../models/Cart');
-const Product = require('../models/Product');
+const { getCartModel }    = require('../models/Cart');
+const { getProductModel } = require('../models/Product');
 
 function formatItem(i) {
   if (!i.product) return null;
@@ -18,6 +18,7 @@ function formatItem(i) {
 // GET /customer/cart
 exports.getCart = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
     const cart = await Cart.findOne({ customer: req.customer._id })
       .populate('items.product', 'name brand price discountPrice images stock status');
 
@@ -37,6 +38,7 @@ exports.getCart = async (req, res, next) => {
 // POST /customer/cart/sync  — body: { items: [{ productId, quantity }] }
 exports.syncCart = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
     const { items } = req.body;
     if (!Array.isArray(items)) {
       return res.status(400).json({ success: false, message: 'items must be an array' });
@@ -59,6 +61,8 @@ exports.syncCart = async (req, res, next) => {
 // POST /customer/cart/:productId  — body: { quantity }
 exports.addItem = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const { productId } = req.params;
     const quantity = Math.max(1, parseInt(req.body.quantity) || 1);
 
@@ -83,6 +87,7 @@ exports.addItem = async (req, res, next) => {
 // PUT /customer/cart/:productId  — body: { quantity }
 exports.updateItem = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
     const { productId } = req.params;
     const quantity = parseInt(req.body.quantity);
 
@@ -105,6 +110,7 @@ exports.updateItem = async (req, res, next) => {
 // DELETE /customer/cart/:productId
 exports.removeItem = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
     const { productId } = req.params;
     await Cart.findOneAndUpdate(
       { customer: req.customer._id },
@@ -117,6 +123,7 @@ exports.removeItem = async (req, res, next) => {
 // DELETE /customer/cart
 exports.clearCart = async (req, res, next) => {
   try {
+    const Cart = getCartModel(req.tenantConn);
     await Cart.findOneAndUpdate(
       { customer: req.customer._id },
       { $set: { items: [] } },

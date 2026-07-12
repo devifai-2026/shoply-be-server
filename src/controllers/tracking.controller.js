@@ -1,7 +1,7 @@
 const jwt   = require('jsonwebtoken');
 const geoip = require('geoip-lite');
 const { UAParser } = require('ua-parser-js');
-const Visit = require('../models/Visit');
+const { getVisitModel } = require('../models/Visit');
 
 const getClientIp = (req) => {
   const forwarded = req.headers['x-forwarded-for'];
@@ -33,6 +33,7 @@ exports.recordEvent = async (req, res) => {
     const geo    = geoip.lookup(ip) || {};
     const parsed = new UAParser(req.headers['user-agent'] || '').getResult();
 
+    const Visit = getVisitModel(req.tenantConn);
     await Visit.create({
       visitorId,
       sessionId: sessionId || null,

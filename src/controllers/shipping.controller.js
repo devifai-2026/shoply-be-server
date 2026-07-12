@@ -1,7 +1,7 @@
-const ShippingZone  = require('../models/ShippingZone');
-const Courier       = require('../models/Courier');
-const StoreSettings = require('../models/StoreSettings');
-const Order         = require('../models/Order');
+const { getShippingZoneModel }  = require('../models/ShippingZone');
+const { getCourierModel }       = require('../models/Courier');
+const { getStoreSettingsModel } = require('../models/StoreSettings');
+const { getOrderModel }         = require('../models/Order');
 const shiprocket    = require('../services/shiprocket.service');
 const delhivery     = require('../services/delhivery.service');
 const pricing       = require('../services/pricing.service');
@@ -10,6 +10,7 @@ const pricing       = require('../services/pricing.service');
 
 exports.listZones = async (req, res, next) => {
   try {
+    const ShippingZone = getShippingZoneModel(req.tenantConn);
     const zones = await ShippingZone.find().sort({ sortOrder: 1 });
     res.json({ success: true, data: zones });
   } catch (err) { next(err); }
@@ -17,6 +18,7 @@ exports.listZones = async (req, res, next) => {
 
 exports.createZone = async (req, res, next) => {
   try {
+    const ShippingZone = getShippingZoneModel(req.tenantConn);
     const zone = await ShippingZone.create(req.body);
     res.status(201).json({ success: true, data: zone });
   } catch (err) { next(err); }
@@ -24,6 +26,7 @@ exports.createZone = async (req, res, next) => {
 
 exports.updateZone = async (req, res, next) => {
   try {
+    const ShippingZone = getShippingZoneModel(req.tenantConn);
     const zone = await ShippingZone.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!zone) return res.status(404).json({ success: false, message: 'Zone not found' });
     res.json({ success: true, data: zone });
@@ -32,6 +35,7 @@ exports.updateZone = async (req, res, next) => {
 
 exports.removeZone = async (req, res, next) => {
   try {
+    const ShippingZone = getShippingZoneModel(req.tenantConn);
     const zone = await ShippingZone.findByIdAndDelete(req.params.id);
     if (!zone) return res.status(404).json({ success: false, message: 'Zone not found' });
     res.json({ success: true, message: 'Zone deleted' });
@@ -42,6 +46,7 @@ exports.removeZone = async (req, res, next) => {
 
 exports.listCouriers = async (req, res, next) => {
   try {
+    const Courier = getCourierModel(req.tenantConn);
     const couriers = await Courier.find();
     res.json({ success: true, data: couriers });
   } catch (err) { next(err); }
@@ -49,6 +54,7 @@ exports.listCouriers = async (req, res, next) => {
 
 exports.toggleCourier = async (req, res, next) => {
   try {
+    const Courier = getCourierModel(req.tenantConn);
     const courier = await Courier.findByIdAndUpdate(
       req.params.id,
       [{ $set: { isActive: { $not: '$isActive' } } }],
@@ -73,6 +79,7 @@ exports.updateCourierCredentials = async (req, res, next) => {
     const update = { apiKey, token: null, tokenExpiry: null };
     if (apiSecret !== undefined) update.apiSecret = apiSecret;
 
+    const Courier = getCourierModel(req.tenantConn);
     const courier = await Courier.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!courier) return res.status(404).json({ success: false, message: 'Courier not found' });
 
@@ -86,6 +93,7 @@ exports.updateCourierCredentials = async (req, res, next) => {
  */
 exports.testCourierConnection = async (req, res, next) => {
   try {
+    const Courier = getCourierModel(req.tenantConn);
     const courier = await Courier.findById(req.params.id);
     if (!courier) return res.status(404).json({ success: false, message: 'Courier not found' });
 
@@ -112,6 +120,7 @@ exports.testCourierConnection = async (req, res, next) => {
 
 exports.getSettings = async (req, res, next) => {
   try {
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
     const settings = await StoreSettings.findOne({ storeId: 'default' }).select('shipping');
     res.json({ success: true, data: settings?.shipping || {} });
   } catch (err) { next(err); }
@@ -120,6 +129,7 @@ exports.getSettings = async (req, res, next) => {
 exports.updateSettings = async (req, res, next) => {
   try {
     const prefixed = Object.fromEntries(Object.entries(req.body).map(([k, v]) => [`shipping.${k}`, v]));
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
     const settings = await StoreSettings.findOneAndUpdate(
       { storeId: 'default' },
       { $set: prefixed },
@@ -133,6 +143,8 @@ exports.updateSettings = async (req, res, next) => {
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
+    const Courier = getCourierModel(req.tenantConn);
     const [shipped, activeCouriers, avgCost] = await Promise.all([
       Order.countDocuments({ status: { $in: ['shipped', 'delivered'] } }),
       Courier.countDocuments({ isActive: true }),
@@ -240,6 +252,7 @@ exports.bookShipment = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'orderId and courierSlug are required' });
     }
 
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findById(orderId).populate('customer', 'name email phone');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (order.awbCode) {
@@ -316,6 +329,7 @@ exports.bookShipment = async (req, res, next) => {
  */
 exports.trackByAwb = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const awb   = req.params.awb?.trim();
     const order = await Order.findOne({ awbCode: awb })
       .select('orderNumber status awbCode courierName courierSlug trackingNumber timeline createdAt');
@@ -354,6 +368,7 @@ exports.trackByAwb = async (req, res, next) => {
  */
 exports.trackOrder = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findById(req.params.orderId).select('awbCode courierSlug orderNumber');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (!order.awbCode) return res.status(400).json({ success: false, message: 'No shipment booked for this order' });
@@ -385,6 +400,7 @@ exports.cancelShipment = async (req, res, next) => {
     const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
 
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findById(orderId).select('awbCode courierSlug status');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (!order.awbCode) return res.status(400).json({ success: false, message: 'No shipment booked for this order' });
@@ -419,6 +435,7 @@ exports.cancelShipment = async (req, res, next) => {
  */
 exports.shiprocketWebhook = async (req, res) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { awb, current_status } = req.body || {};
     if (!awb) return res.json({ success: true });
 
@@ -445,6 +462,7 @@ exports.shiprocketWebhook = async (req, res) => {
  */
 exports.delhiveryWebhook = async (req, res) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const packages = req.body?.packages || [];
     for (const pkg of packages) {
       const waybill        = pkg.waybill;

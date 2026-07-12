@@ -1,4 +1,4 @@
-const Customer = require('../models/Customer');
+const { getCustomerModel } = require('../models/Customer');
 
 exports.getVapidKey = (req, res) => {
   res.json({ success: true, publicKey: process.env.VAPID_PUBLIC_KEY });
@@ -6,6 +6,7 @@ exports.getVapidKey = (req, res) => {
 
 exports.subscribe = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const { subscription } = req.body;
     if (!subscription?.endpoint) {
       return res.status(400).json({ success: false, message: 'Invalid subscription object' });
@@ -20,6 +21,7 @@ exports.subscribe = async (req, res, next) => {
 
 exports.unsubscribe = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     await Customer.findByIdAndUpdate(req.customer._id, {
       webPushSubscription: null,
       deviceType: null,

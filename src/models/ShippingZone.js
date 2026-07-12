@@ -12,4 +12,18 @@ const shippingZoneSchema = new mongoose.Schema({
   states:      [{ type: String }],
 }, { timestamps: true });
 
-module.exports = mongoose.model('ShippingZone', shippingZoneSchema);
+// Default-connection model — the single shared `ecom.ShippingZone` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const ShippingZoneDefault = mongoose.model('ShippingZone', shippingZoneSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'ShippingZone' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getShippingZoneModel(conn) {
+  if (!conn) return ShippingZoneDefault;
+  return conn.models.ShippingZone || conn.model('ShippingZone', shippingZoneSchema);
+}
+
+module.exports = ShippingZoneDefault;
+module.exports.getShippingZoneModel = getShippingZoneModel;

@@ -60,4 +60,19 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ customer: 1 });
 orderSchema.index({ status: 1, platform: 1 });
 orderSchema.index({ createdAt: -1 });
-module.exports = mongoose.model('Order', orderSchema);
+
+// Default-connection model — the single shared `ecom.Order` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const OrderDefault = mongoose.model('Order', orderSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Order' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getOrderModel(conn) {
+  if (!conn) return OrderDefault;
+  return conn.models.Order || conn.model('Order', orderSchema);
+}
+
+module.exports = OrderDefault;
+module.exports.getOrderModel = getOrderModel;

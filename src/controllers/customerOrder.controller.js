@@ -1,17 +1,17 @@
-const Order             = require('../models/Order');
-const SubOrder          = require('../models/SubOrder');
-const Vendor            = require('../models/Vendor');
-const Product           = require('../models/Product');
-const Customer          = require('../models/Customer');
-const Coupon            = require('../models/Coupon');
-const AdminNotification = require('../models/AdminNotification');
-const StoreSettings     = require('../models/StoreSettings');
-const Courier           = require('../models/Courier');
+const { getOrderModel }             = require('../models/Order');
+const { getSubOrderModel }          = require('../models/SubOrder');
+const { getVendorModel }            = require('../models/Vendor');
+const { getProductModel }           = require('../models/Product');
+const { getCustomerModel }          = require('../models/Customer');
+const { getCouponModel }            = require('../models/Coupon');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
+const { getStoreSettingsModel }     = require('../models/StoreSettings');
+const { getCourierModel }           = require('../models/Courier');
 const shiprocket        = require('../services/shiprocket.service');
 const pricing           = require('../services/pricing.service');
 const emailService      = require('../services/email.service');
 
-async function autoBookShiprocket(order) {
+async function autoBookShiprocket(order, { Courier, Customer, Order }) {
   const courier = await Courier.findOne({ slug: 'shiprocket', isActive: true });
   if (!courier) return;
 
@@ -68,6 +68,16 @@ const generateOrderNumber = () => `ORD-${Date.now()}-${Math.floor(Math.random() 
 
 exports.createOrder = async (req, res, next) => {
   try {
+    const Order             = getOrderModel(req.tenantConn);
+    const SubOrder          = getSubOrderModel(req.tenantConn);
+    const Vendor            = getVendorModel(req.tenantConn);
+    const Product           = getProductModel(req.tenantConn);
+    const Customer          = getCustomerModel(req.tenantConn);
+    const Coupon            = getCouponModel(req.tenantConn);
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
+    const StoreSettings     = getStoreSettingsModel(req.tenantConn);
+    const Courier           = getCourierModel(req.tenantConn);
+
     const customerId = req.customer._id;
     const { items, shippingAddress, paymentMethod, couponCode, platform } = req.body;
 
@@ -213,7 +223,7 @@ exports.createOrder = async (req, res, next) => {
     });
 
     // Auto-book shipment via Shiprocket if active — runs after response is sent
-    autoBookShiprocket(order).catch(err =>
+    autoBookShiprocket(order, { Courier, Customer, Order }).catch(err =>
       console.error(`[AutoBook] Shiprocket failed for ${order.orderNumber}:`, err.message, err.response?.data || '')
     );
 
@@ -234,6 +244,7 @@ exports.createOrder = async (req, res, next) => {
 
 exports.getMyOrders = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const customerId = req.customer._id;
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(50,  parseInt(req.query.limit) || 10);
@@ -258,6 +269,7 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.getMyOrder = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findOne({ _id: req.params.id, customer: req.customer._id })
       .populate('items.product', 'name images sku');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -267,6 +279,7 @@ exports.getMyOrder = async (req, res, next) => {
 
 exports.getInvoice = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findOne({ _id: req.params.id, customer: req.customer._id })
       .populate('items.product', 'name images sku')
       .populate('customer', 'name email phone');
@@ -277,6 +290,7 @@ exports.getInvoice = async (req, res, next) => {
 
 exports.trackOrder = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findOne({ _id: req.params.id, customer: req.customer._id })
       .select('orderNumber status awbCode courierName courierSlug trackingNumber timeline shippingAddress createdAt');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -306,6 +320,11 @@ exports.trackOrder = async (req, res, next) => {
 
 exports.cancelOrder = async (req, res, next) => {
   try {
+    const Order         = getOrderModel(req.tenantConn);
+    const SubOrder      = getSubOrderModel(req.tenantConn);
+    const Product       = getProductModel(req.tenantConn);
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+
     const order = await Order.findOne({ _id: req.params.id, customer: req.customer._id });
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (!['pending', 'processing'].includes(order.status)) {

@@ -43,4 +43,18 @@ productSchema.index({ category: 1, status: 1 });
 productSchema.index({ vendor: 1, status: 1 });
 productSchema.index({ stock: 1 });
 
-module.exports = mongoose.model('Product', productSchema);
+// Default-connection model — the single shared `ecom.Product` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const ProductDefault = mongoose.model('Product', productSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Product' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getProductModel(conn) {
+  if (!conn) return ProductDefault;
+  return conn.models.Product || conn.model('Product', productSchema);
+}
+
+module.exports = ProductDefault;
+module.exports.getProductModel = getProductModel;

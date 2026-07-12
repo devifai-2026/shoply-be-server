@@ -1,9 +1,9 @@
 const jwt    = require('jsonwebtoken');
-const Vendor = require('../models/Vendor');
-const AdminNotification = require('../models/AdminNotification');
+const { getVendorModel } = require('../models/Vendor');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
 
-const signToken = (id) =>
-  jwt.sign({ id, role: 'vendor' }, process.env.JWT_SECRET, {
+const signToken = (id, slug) =>
+  jwt.sign({ id, role: 'vendor', slug: slug || null }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 
@@ -25,6 +25,7 @@ exports.register = async (req, res, next) => {
     if (password.length < 8) {
       return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
     }
+    const Vendor = getVendorModel(req.tenantConn);
     const exists = await Vendor.findOne({ email: email.toLowerCase() });
     if (exists) {
       return res.status(409).json({ success: false, message: 'A vendor with this email already exists' });
@@ -42,6 +43,7 @@ exports.register = async (req, res, next) => {
       pickupAddress: pickupAddress || {},
     });
 
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     await AdminNotification.create({
       type:    'vendor',
       title:   'New Vendor Registration',
@@ -51,7 +53,7 @@ exports.register = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      token:   signToken(vendor._id),
+      token:   signToken(vendor._id, req.tenant?.slug),
       data:    publicVendor(vendor),
       message: 'Registration received — your store is pending approval',
     });
@@ -61,6 +63,7 @@ exports.register = async (req, res, next) => {
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
+    const Vendor = getVendorModel(req.tenantConn);
     const vendor = await Vendor.findOne({ email: (email || '').toLowerCase() }).select('+password');
     if (!vendor || !(await vendor.matchPassword(password || ''))) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -68,7 +71,7 @@ exports.login = async (req, res, next) => {
     if (vendor.status === 'suspended') {
       return res.status(403).json({ success: false, message: 'Account suspended — contact support' });
     }
-    res.json({ success: true, token: signToken(vendor._id), data: publicVendor(vendor) });
+    res.json({ success: true, token: signToken(vendor._id, req.tenant?.slug), data: publicVendor(vendor) });
   } catch (err) { next(err); }
 };
 

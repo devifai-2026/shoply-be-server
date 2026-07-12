@@ -1,5 +1,5 @@
-const Order   = require('../models/Order');
-const Product = require('../models/Product');
+const { getOrderModel }   = require('../models/Order');
+const { getProductModel } = require('../models/Product');
 
 const getDateRange = (period = '30d') => {
   const end   = new Date();
@@ -11,6 +11,7 @@ const getDateRange = (period = '30d') => {
 
 exports.getSummary = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period);
     const prev           = new Date(start);
     prev.setDate(prev.getDate() - (end - start) / 86400000);
@@ -44,6 +45,7 @@ exports.getSummary = async (req, res, next) => {
 
 exports.getTopProducts = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period);
     const limit          = parseInt(req.query.limit) || 10;
 
@@ -61,6 +63,7 @@ exports.getTopProducts = async (req, res, next) => {
 
 exports.getSalesByCategory = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period);
 
     const result = await Order.aggregate([
@@ -83,6 +86,7 @@ exports.getSalesByCategory = async (req, res, next) => {
 
 exports.exportReport = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period);
     const orders = await Order.find({ createdAt: { $gte: start, $lte: end } })
       .populate('customer', 'name email')

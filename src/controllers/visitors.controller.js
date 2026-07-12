@@ -1,4 +1,4 @@
-const Visit = require('../models/Visit');
+const { getVisitModel } = require('../models/Visit');
 
 const getDateRange = (period = '30d') => {
   const end   = new Date();
@@ -10,6 +10,7 @@ const getDateRange = (period = '30d') => {
 
 exports.getSummary = async (req, res, next) => {
   try {
+    const Visit = getVisitModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period);
     const match = { createdAt: { $gte: start, $lte: end } };
 
@@ -52,6 +53,7 @@ exports.getSummary = async (req, res, next) => {
 
 exports.listVisits = async (req, res, next) => {
   try {
+    const Visit = getVisitModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period || '7d');
     const page  = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -82,6 +84,7 @@ exports.listVisits = async (req, res, next) => {
 
 exports.getMapPoints = async (req, res, next) => {
   try {
+    const Visit = getVisitModel(req.tenantConn);
     const { start, end } = getDateRange(req.query.period || '30d');
 
     const points = await Visit.aggregate([
@@ -112,6 +115,7 @@ exports.getMapPoints = async (req, res, next) => {
 
 exports.getLiveVisitors = async (req, res, next) => {
   try {
+    const Visit = getVisitModel(req.tenantConn);
     const since = new Date(Date.now() - 5 * 60 * 1000);
     const match = { createdAt: { $gte: since } };
 

@@ -102,4 +102,18 @@ const storeSettingsSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-module.exports = mongoose.model('StoreSettings', storeSettingsSchema);
+// Default-connection model — the single shared `ecom.StoreSettings` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const StoreSettingsDefault = mongoose.model('StoreSettings', storeSettingsSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'StoreSettings' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getStoreSettingsModel(conn) {
+  if (!conn) return StoreSettingsDefault;
+  return conn.models.StoreSettings || conn.model('StoreSettings', storeSettingsSchema);
+}
+
+module.exports = StoreSettingsDefault;
+module.exports.getStoreSettingsModel = getStoreSettingsModel;

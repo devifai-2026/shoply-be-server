@@ -1,6 +1,6 @@
-const Order    = require('../models/Order');
-const Customer = require('../models/Customer');
-const Product  = require('../models/Product');
+const { getOrderModel }    = require('../models/Order');
+const { getCustomerModel } = require('../models/Customer');
+const { getProductModel }  = require('../models/Product');
 
 const dateRange = (period = '30d') => {
   const end   = new Date();
@@ -12,6 +12,8 @@ const dateRange = (period = '30d') => {
 
 exports.getSummary = async (req, res, next) => {
   try {
+    const Order    = getOrderModel(req.tenantConn);
+    const Customer = getCustomerModel(req.tenantConn);
     const { start, end } = dateRange(req.query.period);
     const filter         = { createdAt: { $gte: start, $lte: end } };
 
@@ -37,6 +39,7 @@ exports.getSummary = async (req, res, next) => {
 
 exports.getSalesByChannel = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = dateRange(req.query.period);
     const result = await Order.aggregate([
       { $match: { createdAt: { $gte: start, $lte: end }, status: { $nin: ['cancelled', 'refunded'] } } },
@@ -50,6 +53,7 @@ exports.getSalesByChannel = async (req, res, next) => {
 
 exports.getOrderStatus = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = dateRange(req.query.period);
     const result = await Order.aggregate([
       { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -62,6 +66,7 @@ exports.getOrderStatus = async (req, res, next) => {
 
 exports.getInventoryAlerts = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const [outOfStock, lowStock, healthyStock] = await Promise.all([
       Product.countDocuments({ stock: 0 }),
       Product.countDocuments({ $expr: { $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', '$alertLevel'] }] } }),
@@ -73,6 +78,7 @@ exports.getInventoryAlerts = async (req, res, next) => {
 
 exports.getTopProducts = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = dateRange(req.query.period);
     const limit          = parseInt(req.query.limit) || 10;
     const result = await Order.aggregate([
@@ -88,6 +94,7 @@ exports.getTopProducts = async (req, res, next) => {
 
 exports.getTopCustomers = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const limit = parseInt(req.query.limit) || 10;
     const customers = await Customer.find({ status: 'active' })
       .sort({ totalSpent: -1 })
@@ -99,6 +106,7 @@ exports.getTopCustomers = async (req, res, next) => {
 
 exports.exportCSV = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { start, end } = dateRange(req.query.period);
     const orders = await Order.find({ createdAt: { $gte: start, $lte: end } })
       .populate('customer', 'name email')

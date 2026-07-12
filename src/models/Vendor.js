@@ -58,4 +58,18 @@ vendorSchema.methods.matchPassword = function (entered) {
   return bcrypt.compare(entered, this.password);
 };
 
-module.exports = mongoose.model('Vendor', vendorSchema);
+// Default-connection model — the single shared `ecom.Vendor` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const VendorDefault = mongoose.model('Vendor', vendorSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Vendor' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getVendorModel(conn) {
+  if (!conn) return VendorDefault;
+  return conn.models.Vendor || conn.model('Vendor', vendorSchema);
+}
+
+module.exports = VendorDefault;
+module.exports.getVendorModel = getVendorModel;

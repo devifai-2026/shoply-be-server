@@ -1,8 +1,9 @@
-const Product              = require('../models/Product');
-const AdminNotification    = require('../models/AdminNotification');
+const { getProductModel } = require('../models/Product');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
 
 exports.list = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const filter = {};
     if (req.query.status === 'low') filter.$expr = { $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', '$alertLevel'] }] };
     if (req.query.status === 'out') filter.stock = 0;
@@ -24,6 +25,7 @@ exports.list = async (req, res, next) => {
 
 exports.getAlerts = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const [outOfStock, lowStock] = await Promise.all([
       Product.countDocuments({ stock: 0 }),
       Product.countDocuments({ $expr: { $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', '$alertLevel'] }] } }),
@@ -34,6 +36,8 @@ exports.getAlerts = async (req, res, next) => {
 
 exports.updateStock = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const { stock, alertLevel } = req.body;
     const update = {};
     if (stock !== undefined)      update.stock      = stock;
@@ -58,6 +62,7 @@ exports.updateStock = async (req, res, next) => {
 
 exports.restock = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const { quantity } = req.body;
     if (!quantity || quantity <= 0) {
       return res.status(400).json({ success: false, message: 'Quantity must be positive' });

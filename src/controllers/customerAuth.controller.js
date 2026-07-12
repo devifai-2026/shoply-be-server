@@ -1,20 +1,21 @@
 const crypto   = require('crypto');
 const jwt      = require('jsonwebtoken');
-const Customer = require('../models/Customer');
+const { getCustomerModel } = require('../models/Customer');
 const emailService = require('../services/email.service');
 
-const signToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '30d' });
+const signToken = (id, slug) =>
+  jwt.sign({ id, slug: slug || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '30d' });
 
 exports.register = async (req, res, next) => {
   try {
     const { name, email, password, phone } = req.body;
+    const Customer = getCustomerModel(req.tenantConn);
 
     // Basic validation
     if (!name || !email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Please provide name, email, and password' 
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, email, and password'
       });
     }
 
@@ -46,27 +47,28 @@ exports.register = async (req, res, next) => {
       platform: 'Web' 
     });
 
-    const token = signToken(customer._id);
+    const token = signToken(customer._id, req.tenant?.slug);
 
-    res.status(201).json({ 
-      success: true, 
-      token, 
-      customer 
+    res.status(201).json({
+      success: true,
+      token,
+      customer
     });
-  } catch (err) { 
-    next(err); 
+  } catch (err) {
+    next(err);
   }
 };
 
 exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
+    const Customer = getCustomerModel(req.tenantConn);
 
     // Basic validation
     if (!email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Please provide an email and password' 
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide an email and password'
       });
     }
 
@@ -97,20 +99,21 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    const token = signToken(customer._id);
+    const token = signToken(customer._id, req.tenant?.slug);
 
-    res.status(200).json({ 
-      success: true, 
-      token, 
-      customer 
+    res.status(200).json({
+      success: true,
+      token,
+      customer
     });
-  } catch (err) { 
-    next(err); 
+  } catch (err) {
+    next(err);
   }
 };
 
 exports.me = async (req, res) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findById(req.customer._id);
     if (!customer) {
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -124,7 +127,8 @@ exports.me = async (req, res) => {
 exports.updateProfile = async (req, res, next) => {
   try {
     const { name, phone, avatar } = req.body;
-    
+    const Customer = getCustomerModel(req.tenantConn);
+
     const updateFields = {};
     if (name) updateFields.name = name;
     if (phone) updateFields.phone = phone;
@@ -145,11 +149,12 @@ exports.updateProfile = async (req, res, next) => {
 exports.changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    const Customer = getCustomerModel(req.tenantConn);
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Please provide both current and new passwords' 
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide both current and new passwords'
       });
     }
 
@@ -177,6 +182,7 @@ exports.changePassword = async (req, res, next) => {
 // Address Management
 exports.getAddresses = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findById(req.customer._id).select('addresses');
     res.json({ success: true, addresses: customer.addresses });
   } catch (err) { 
@@ -187,7 +193,8 @@ exports.getAddresses = async (req, res, next) => {
 exports.addAddress = async (req, res, next) => {
   try {
     const { label, name, phone, line1, line2, city, state, pincode, country, isDefault } = req.body;
-    
+    const Customer = getCustomerModel(req.tenantConn);
+
     const customer = await Customer.findById(req.customer._id);
     
     // If setting as default, unset others
@@ -215,7 +222,8 @@ exports.updateAddress = async (req, res, next) => {
   try {
     const { addressId } = req.params;
     const updates = req.body;
-    
+    const Customer = getCustomerModel(req.tenantConn);
+
     const customer = await Customer.findById(req.customer._id);
     const address = customer.addresses.id(addressId);
     
@@ -240,8 +248,9 @@ exports.updateAddress = async (req, res, next) => {
 exports.deleteAddress = async (req, res, next) => {
   try {
     const { addressId } = req.params;
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findById(req.customer._id);
-    
+
     const address = customer.addresses.id(addressId);
     if (!address) {
       return res.status(404).json({ success: false, message: 'Address not found' });
@@ -265,6 +274,7 @@ exports.deleteAddress = async (req, res, next) => {
 exports.setDefaultAddress = async (req, res, next) => {
   try {
     const { addressId } = req.params;
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findById(req.customer._id);
 
     let found = false;
@@ -291,6 +301,7 @@ exports.setDefaultAddress = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
+    const Customer = getCustomerModel(req.tenantConn);
     if (!email) {
       return res.status(400).json({ success: false, message: 'Please provide an email address' });
     }
@@ -335,6 +346,7 @@ exports.resetPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
     }
 
+    const Customer = getCustomerModel(req.tenantConn);
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
     const customer = await Customer.findOne({
@@ -351,7 +363,7 @@ exports.resetPassword = async (req, res, next) => {
     customer.resetPasswordExpire = undefined;
     await customer.save();
 
-    const jwtToken = signToken(customer._id);
+    const jwtToken = signToken(customer._id, req.tenant?.slug);
     res.json({ success: true, message: 'Password has been reset successfully.', token: jwtToken });
   } catch (err) {
     next(err);

@@ -1,6 +1,6 @@
-const Vendor   = require('../models/Vendor');
-const Product  = require('../models/Product');
-const SubOrder = require('../models/SubOrder');
+const { getVendorModel }   = require('../models/Vendor');
+const { getProductModel }  = require('../models/Product');
+const { getSubOrderModel } = require('../models/SubOrder');
 
 const paginate = (req, cap = 50) => {
   const page  = Math.max(1, parseInt(req.query.page) || 1);
@@ -10,6 +10,7 @@ const paginate = (req, cap = 50) => {
 
 exports.list = async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
     const { page, limit, skip } = paginate(req);
     const filter = {};
     if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
@@ -28,6 +29,7 @@ exports.list = async (req, res, next) => {
 
 exports.stats = async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
     const rows = await Vendor.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]);
     const byStatus = Object.fromEntries(rows.map(r => [r._id, r.count]));
     res.json({
@@ -45,6 +47,7 @@ exports.stats = async (req, res, next) => {
 
 exports.get = async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
     const vendor = await Vendor.findById(req.params.id).lean();
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
     res.json({ success: true, data: vendor });
@@ -53,6 +56,7 @@ exports.get = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
     const allowed = ['commissionRate', 'storeName', 'description', 'phone', 'gstin', 'pan', 'bankDetails', 'pickupAddress'];
     const updates = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
@@ -64,6 +68,7 @@ exports.update = async (req, res, next) => {
 
 const setStatus = (status) => async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
     const vendor = await Vendor.findByIdAndUpdate(
       req.params.id,
       { status, statusNote: req.body?.reason || '' },
@@ -81,6 +86,7 @@ exports.reactivate = setStatus('approved');
 
 exports.listProducts = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const { page, limit, skip } = paginate(req);
     const filter = { vendor: req.params.id };
     const [products, total] = await Promise.all([
@@ -93,6 +99,7 @@ exports.listProducts = async (req, res, next) => {
 
 exports.listSubOrders = async (req, res, next) => {
   try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const { page, limit, skip } = paginate(req);
     const filter = { vendor: req.params.id };
     const [subOrders, total] = await Promise.all([

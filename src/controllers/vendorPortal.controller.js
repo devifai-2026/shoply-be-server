@@ -1,5 +1,5 @@
-const Product  = require('../models/Product');
-const SubOrder = require('../models/SubOrder');
+const { getProductModel } = require('../models/Product');
+const { getSubOrderModel } = require('../models/SubOrder');
 
 // Turn uploaded files into server-relative URLs (served from /uploads)
 exports.uploadImages = async (req, res, next) => {
@@ -21,6 +21,7 @@ const paginate = (req, cap = 50) => {
 
 exports.listProducts = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const { page, limit, skip } = paginate(req);
     const filter = { vendor: req.vendor._id };
     if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
@@ -36,6 +37,7 @@ exports.listProducts = async (req, res, next) => {
 
 exports.createProduct = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const body = { ...req.body };
     body.vendor = req.vendor._id;   // ownership is never client-chosen
     body.status = 'draft';          // vendor listings go live only when published
@@ -47,6 +49,7 @@ exports.createProduct = async (req, res, next) => {
 
 exports.updateProduct = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const body = { ...req.body };
     delete body.vendor; delete body.soldCount; delete body.rating; delete body.reviewCount;
     const product = await Product.findOneAndUpdate(
@@ -61,6 +64,7 @@ exports.updateProduct = async (req, res, next) => {
 
 exports.deleteProduct = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const product = await Product.findOneAndDelete({ _id: req.params.id, vendor: req.vendor._id });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     res.json({ success: true, message: 'Product deleted' });
@@ -71,6 +75,7 @@ exports.deleteProduct = async (req, res, next) => {
 
 exports.listSubOrders = async (req, res, next) => {
   try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const { page, limit, skip } = paginate(req);
     const filter = { vendor: req.vendor._id };
     if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
@@ -87,6 +92,7 @@ exports.listSubOrders = async (req, res, next) => {
 
 exports.getSubOrder = async (req, res, next) => {
   try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const subOrder = await SubOrder.findOne({ _id: req.params.id, vendor: req.vendor._id })
       .populate('order', 'orderNumber shippingAddress paymentMethod paymentStatus customer createdAt');
     if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -102,6 +108,7 @@ const VENDOR_STATUS_FLOW = {
 
 exports.updateSubOrderStatus = async (req, res, next) => {
   try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const { status, trackingNumber, courierName, note } = req.body;
     const subOrder = await SubOrder.findOne({ _id: req.params.id, vendor: req.vendor._id });
     if (!subOrder) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -124,6 +131,8 @@ exports.updateSubOrderStatus = async (req, res, next) => {
 
 exports.dashboard = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const vendorId = req.vendor._id;
     const since30 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
 
@@ -170,6 +179,7 @@ exports.dashboard = async (req, res, next) => {
 
 exports.earnings = async (req, res, next) => {
   try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const vendorId = req.vendor._id;
     const { page, limit, skip } = paginate(req);
 

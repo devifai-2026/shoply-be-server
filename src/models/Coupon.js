@@ -34,4 +34,18 @@ couponSchema.methods.isValid = function (orderTotal, platform) {
   return { valid: true };
 };
 
-module.exports = mongoose.model('Coupon', couponSchema);
+// Default-connection model — the single shared `ecom.Coupon` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const CouponDefault = mongoose.model('Coupon', couponSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Coupon' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getCouponModel(conn) {
+  if (!conn) return CouponDefault;
+  return conn.models.Coupon || conn.model('Coupon', couponSchema);
+}
+
+module.exports = CouponDefault;
+module.exports.getCouponModel = getCouponModel;

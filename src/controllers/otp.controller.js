@@ -1,6 +1,6 @@
 const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
-const Customer = require('../models/Customer');
+const { getCustomerModel } = require('../models/Customer');
 const mc       = require('../services/messageCentral.service');
 
 const signToken = (id) =>
@@ -38,6 +38,7 @@ exports.verifyOtp = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
     }
 
+    const Customer = getCustomerModel(req.tenantConn);
     let customer = await Customer.findOne({ phone: phone.trim() });
     let isNew = false;
 

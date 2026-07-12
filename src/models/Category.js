@@ -29,4 +29,18 @@ categorySchema.virtual('subCategories', {
 
 categorySchema.index({ parent: 1, sortOrder: 1 });
 
-module.exports = mongoose.model('Category', categorySchema);
+// Default-connection model — the single shared `ecom.Category` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const CategoryDefault = mongoose.model('Category', categorySchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Category' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getCategoryModel(conn) {
+  if (!conn) return CategoryDefault;
+  return conn.models.Category || conn.model('Category', categorySchema);
+}
+
+module.exports = CategoryDefault;
+module.exports.getCategoryModel = getCategoryModel;

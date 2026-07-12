@@ -27,4 +27,18 @@ flashSaleSchema.virtual('isLive').get(function () {
 
 flashSaleSchema.index({ isActive: 1, startsAt: 1, endsAt: 1 });
 
-module.exports = mongoose.model('FlashSale', flashSaleSchema);
+// Default-connection model — the single shared `ecom.FlashSale` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const FlashSaleDefault = mongoose.model('FlashSale', flashSaleSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'FlashSale' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getFlashSaleModel(conn) {
+  if (!conn) return FlashSaleDefault;
+  return conn.models.FlashSale || conn.model('FlashSale', flashSaleSchema);
+}
+
+module.exports = FlashSaleDefault;
+module.exports.getFlashSaleModel = getFlashSaleModel;

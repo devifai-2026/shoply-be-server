@@ -1,32 +1,32 @@
-const Product      = require('../models/Product');
-const Category     = require('../models/Category');
-const Brand        = require('../models/Brand');
-const FlashSale    = require('../models/FlashSale');
-const Appearance   = require('../models/Appearance');
-const Coupon       = require('../models/Coupon');
-const Review       = require('../models/Review');
-const Vendor       = require('../models/Vendor');
-const StoreSettings = require('../models/StoreSettings');
-const AdminNotification = require('../models/AdminNotification');
+const { getProductModel } = require('../models/Product');
+const { getCategoryModel } = require('../models/Category');
+const { getBrandModel } = require('../models/Brand');
+const { getFlashSaleModel } = require('../models/FlashSale');
+const { getAppearanceModel } = require('../models/Appearance');
+const { getCouponModel } = require('../models/Coupon');
+const { getReviewModel } = require('../models/Review');
+const { getVendorModel } = require('../models/Vendor');
+const { getStoreSettingsModel } = require('../models/StoreSettings');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // Recursively collect a category ID and all its descendant IDs
-const collectDescendantIds = async (rootId) => {
+const collectDescendantIds = async (rootId, CategoryModel) => {
   const ids = [rootId];
-  const children = await Category.find({ parent: rootId, isActive: true }).select('_id').lean();
+  const children = await CategoryModel.find({ parent: rootId, isActive: true }).select('_id').lean();
   for (const child of children) {
-    const nested = await collectDescendantIds(child._id);
+    const nested = await collectDescendantIds(child._id, CategoryModel);
     ids.push(...nested);
   }
   return ids;
 };
 
 // Resolve a slug to a category doc + all descendant IDs (for hierarchical filtering)
-const resolveCategorySlug = async (slug) => {
-  const cat = await Category.findOne({ slug, isActive: true }).lean();
+const resolveCategorySlug = async (slug, CategoryModel) => {
+  const cat = await CategoryModel.findOne({ slug, isActive: true }).lean();
   if (!cat) return null;
-  const ids = await collectDescendantIds(cat._id);
+  const ids = await collectDescendantIds(cat._id, CategoryModel);
   return { cat, ids };
 };
 
@@ -34,6 +34,9 @@ const resolveCategorySlug = async (slug) => {
 
 exports.listProducts = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
+    const Category = getCategoryModel(req.tenantConn);
+
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip  = (page - 1) * limit;
@@ -42,7 +45,7 @@ exports.listProducts = async (req, res, next) => {
 
     // ── Category filtering (slug-based, includes all descendants) ──────────
     if (req.query.categorySlug) {
-      const resolved = await resolveCategorySlug(req.query.categorySlug);
+      const resolved = await resolveCategorySlug(req.query.categorySlug, Category);
       if (resolved) filter.category = { $in: resolved.ids };
       else filter.category = null; // no match → return empty
     } else if (req.query.category) {
@@ -143,6 +146,8 @@ exports.listProducts = async (req, res, next) => {
 
 exports.getProduct = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
+    const Review = getReviewModel(req.tenantConn);
     const { id } = req.params;
     const product = await Product.findOne({ _id: id, status: 'active', visibleWeb: true })
       .populate('category', 'name slug parent depth')
@@ -181,6 +186,7 @@ const buildTree = (flat, parentId = null) =>
 
 exports.listCategories = async (req, res, next) => {
   try {
+    const Category = getCategoryModel(req.tenantConn);
     const cats = await Category.find({ isActive: true })
       .sort({ depth: 1, sortOrder: 1 })
       .lean();
@@ -192,6 +198,7 @@ exports.listCategories = async (req, res, next) => {
 
 exports.listBrands = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const brands = await Brand.find({ isActive: true })
       .select('name slug logo')
       .sort({ sortOrder: 1, name: 1 })
@@ -204,6 +211,7 @@ exports.listBrands = async (req, res, next) => {
 
 exports.getActiveFlashSale = async (req, res, next) => {
   try {
+    const FlashSale = getFlashSaleModel(req.tenantConn);
     const now  = new Date();
     const sale = await FlashSale.findOne({ isActive: true, startsAt: { $lte: now }, endsAt: { $gte: now } })
       .populate('products.product', 'name sku images price discountPrice');
@@ -215,6 +223,8 @@ exports.getActiveFlashSale = async (req, res, next) => {
 
 exports.getAppearance = async (req, res, next) => {
   try {
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
     const [appearance, storeSettings] = await Promise.all([
       Appearance.findOneAndUpdate(
         { storeId: 'default' },
@@ -263,6 +273,7 @@ exports.getAppearance = async (req, res, next) => {
 
 exports.validateCoupon = async (req, res, next) => {
   try {
+    const Coupon = getCouponModel(req.tenantConn);
     const { code, orderTotal, platform } = req.body;
     if (!code) return res.status(400).json({ success: false, message: 'Coupon code is required' });
 
@@ -288,6 +299,7 @@ exports.validateCoupon = async (req, res, next) => {
 
 exports.getProductReviews = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
     const page  = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, parseInt(req.query.limit) || 10);
     const skip  = (page - 1) * limit;
@@ -308,6 +320,10 @@ exports.getProductReviews = async (req, res, next) => {
 
 exports.submitReview = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const { rating, title, content, orderId } = req.body;
     if (!rating || !content) {
       return res.status(400).json({ success: false, message: 'Rating and content are required' });
@@ -357,6 +373,8 @@ exports.submitReview = async (req, res, next) => {
 
 exports.getVendorStore = async (req, res, next) => {
   try {
+    const Vendor = getVendorModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const vendor = await Vendor.findOne({ slug: req.params.slug, status: 'approved' })
       .select('storeName slug logo banner description rating createdAt')
       .lean();

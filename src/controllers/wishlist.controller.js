@@ -1,8 +1,9 @@
-const Customer = require('../models/Customer');
-const Product  = require('../models/Product');
+const { getCustomerModel } = require('../models/Customer');
+const { getProductModel }  = require('../models/Product');
 
 exports.getWishlist = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findById(req.customer._id)
       .populate('wishlist', 'name slug price originalPrice images brand stock');
     res.json({ success: true, data: customer.wishlist || [] });
@@ -11,6 +12,8 @@ exports.getWishlist = async (req, res, next) => {
 
 exports.toggleWishlist = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const { productId } = req.params;
 
     const product = await Product.findById(productId).lean();
@@ -31,6 +34,7 @@ exports.toggleWishlist = async (req, res, next) => {
 
 exports.removeFromWishlist = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const { productId } = req.params;
     await Customer.findByIdAndUpdate(req.customer._id, { $pull: { wishlist: productId } });
     res.json({ success: true, added: false });

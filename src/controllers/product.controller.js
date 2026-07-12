@@ -1,4 +1,4 @@
-const Product  = require('../models/Product');
+const { getProductModel } = require('../models/Product');
 const path     = require('path');
 
 const buildQuery = (query) => {
@@ -13,6 +13,7 @@ const buildQuery = (query) => {
 
 exports.list = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip  = (page - 1) * limit;
@@ -34,6 +35,7 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const product = await Product.findById(req.params.id).populate('category', 'name slug');
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     res.json({ success: true, data: product });
@@ -42,6 +44,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const images = req.files ? req.files.map(f => `/uploads/products/${f.filename}`) : [];
     const product = await Product.create({ ...req.body, images });
     res.status(201).json({ success: true, data: product });
@@ -50,6 +53,7 @@ exports.create = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     res.json({ success: true, data: product });
@@ -58,6 +62,7 @@ exports.update = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     res.json({ success: true, message: 'Product deleted' });
@@ -66,6 +71,7 @@ exports.remove = async (req, res, next) => {
 
 exports.addImages = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     if (!req.files?.length) return res.status(400).json({ success: false, message: 'No images uploaded' });
     const newImages = req.files.map(f => `/uploads/products/${f.filename}`);
     const product   = await Product.findByIdAndUpdate(
@@ -80,6 +86,7 @@ exports.addImages = async (req, res, next) => {
 
 exports.removeImage = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const { imageUrl } = req.body;
     const product = await Product.findByIdAndUpdate(
       req.params.id,
@@ -93,6 +100,7 @@ exports.removeImage = async (req, res, next) => {
 
 exports.updateStock = async (req, res, next) => {
   try {
+    const Product = getProductModel(req.tenantConn);
     const { stock, alertLevel } = req.body;
     const update = {};
     if (stock !== undefined)      update.stock      = stock;

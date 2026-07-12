@@ -19,4 +19,18 @@ reviewSchema.index({ product: 1, status: 1 });
 reviewSchema.index({ customer: 1 });
 reviewSchema.index({ status: 1, createdAt: -1 });
 
-module.exports = mongoose.model('Review', reviewSchema);
+// Default-connection model — the single shared `ecom.Review` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const ReviewDefault = mongoose.model('Review', reviewSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Review' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getReviewModel(conn) {
+  if (!conn) return ReviewDefault;
+  return conn.models.Review || conn.model('Review', reviewSchema);
+}
+
+module.exports = ReviewDefault;
+module.exports.getReviewModel = getReviewModel;

@@ -1,6 +1,6 @@
 const webpush          = require('web-push');
-const PushNotification = require('../models/PushNotification');
-const Customer         = require('../models/Customer');
+const { getPushNotificationModel } = require('../models/PushNotification');
+const { getCustomerModel } = require('../models/Customer');
 
 function getWebpush() {
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
@@ -16,6 +16,7 @@ function getWebpush() {
 
 exports.list = async (req, res, next) => {
   try {
+    const PushNotification = getPushNotificationModel(req.tenantConn);
     const limit = parseInt(req.query.limit) || 20;
     const page  = Math.max(1, parseInt(req.query.page) || 1);
     const skip  = (page - 1) * limit;
@@ -30,6 +31,8 @@ exports.list = async (req, res, next) => {
 
 exports.send = async (req, res, next) => {
   try {
+    const PushNotification = getPushNotificationModel(req.tenantConn);
+    const Customer = getCustomerModel(req.tenantConn);
     const { title, body, audience, deepLink, deepLinkTarget, imageUrl } = req.body;
 
     const filter = { webPushSubscription: { $ne: null }, status: 'active' };
@@ -70,6 +73,7 @@ exports.send = async (req, res, next) => {
 
 exports.schedule = async (req, res, next) => {
   try {
+    const PushNotification = getPushNotificationModel(req.tenantConn);
     const { title, body, audience, deepLink, deepLinkTarget, imageUrl, scheduledAt } = req.body;
     if (!scheduledAt || new Date(scheduledAt) <= new Date()) {
       return res.status(400).json({ success: false, message: 'Scheduled time must be in the future' });
@@ -84,6 +88,8 @@ exports.schedule = async (req, res, next) => {
 
 exports.getStats = async (req, res, next) => {
   try {
+    const PushNotification = getPushNotificationModel(req.tenantConn);
+    const Customer = getCustomerModel(req.tenantConn);
     const [subscriberCount, sentThisMonth, avgOpenRate] = await Promise.all([
       Customer.countDocuments({ webPushSubscription: { $ne: null }, status: 'active' }),
       PushNotification.countDocuments({

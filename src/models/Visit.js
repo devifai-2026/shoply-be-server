@@ -31,4 +31,18 @@ visitSchema.index({ visitorId: 1 });
 // Auto-purge raw IP/visit records after 180 days
 visitSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 180 });
 
-module.exports = mongoose.model('Visit', visitSchema);
+// Default-connection model — the single shared `ecom.Visit` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const VisitDefault = mongoose.model('Visit', visitSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Visit' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getVisitModel(conn) {
+  if (!conn) return VisitDefault;
+  return conn.models.Visit || conn.model('Visit', visitSchema);
+}
+
+module.exports = VisitDefault;
+module.exports.getVisitModel = getVisitModel;

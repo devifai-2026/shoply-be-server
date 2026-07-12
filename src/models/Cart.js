@@ -10,4 +10,18 @@ const cartSchema = new mongoose.Schema({
   items:    [cartItemSchema],
 }, { timestamps: true });
 
-module.exports = mongoose.model('Cart', cartSchema);
+// Default-connection model — the single shared `ecom.Cart` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const CartDefault = mongoose.model('Cart', cartSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Cart' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getCartModel(conn) {
+  if (!conn) return CartDefault;
+  return conn.models.Cart || conn.model('Cart', cartSchema);
+}
+
+module.exports = CartDefault;
+module.exports.getCartModel = getCartModel;

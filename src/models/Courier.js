@@ -14,4 +14,18 @@ const courierSchema = new mongoose.Schema({
   supportedZones: [{ type: String }],
 }, { timestamps: true });
 
-module.exports = mongoose.model('Courier', courierSchema);
+// Default-connection model — the single shared `ecom.Courier` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const CourierDefault = mongoose.model('Courier', courierSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Courier' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getCourierModel(conn) {
+  if (!conn) return CourierDefault;
+  return conn.models.Courier || conn.model('Courier', courierSchema);
+}
+
+module.exports = CourierDefault;
+module.exports.getCourierModel = getCourierModel;

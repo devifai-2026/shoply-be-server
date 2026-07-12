@@ -1,14 +1,15 @@
-const Order             = require('../models/Order');
-const SubOrder          = require('../models/SubOrder');
-const Customer          = require('../models/Customer');
-const Product           = require('../models/Product');
-const AdminNotification = require('../models/AdminNotification');
-const StoreSettings     = require('../models/StoreSettings');
+const { getOrderModel }             = require('../models/Order');
+const { getSubOrderModel }          = require('../models/SubOrder');
+const { getCustomerModel }          = require('../models/Customer');
+const { getProductModel }           = require('../models/Product');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
+const { getStoreSettingsModel }     = require('../models/StoreSettings');
 
 const generateOrderNumber = () => `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 exports.list = async (req, res, next) => {
   try {
+    const Order  = getOrderModel(req.tenantConn);
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, parseInt(req.query.limit) || 20);
     const skip   = (page - 1) * limit;
@@ -46,6 +47,8 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Order    = getOrderModel(req.tenantConn);
+    const SubOrder = getSubOrderModel(req.tenantConn);
     const order = await Order.findById(req.params.id)
       .populate('customer', 'name email phone')
       .populate('items.product', 'name images sku');
@@ -61,6 +64,11 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Order             = getOrderModel(req.tenantConn);
+    const Customer          = getCustomerModel(req.tenantConn);
+    const Product           = getProductModel(req.tenantConn);
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
+    const StoreSettings     = getStoreSettingsModel(req.tenantConn);
     const { customerId, items, platform, shippingAddress, paymentMethod, couponCode } = req.body;
 
     const productIds = items.map(i => i.product);
@@ -120,6 +128,7 @@ exports.create = async (req, res, next) => {
 
 exports.updateStatus = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const { status, note, trackingNumber, courierName } = req.body;
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'];
     if (!validStatuses.includes(status)) {
@@ -143,6 +152,7 @@ exports.updateStatus = async (req, res, next) => {
 
 exports.exportCSV = async (req, res, next) => {
   try {
+    const Order  = getOrderModel(req.tenantConn);
     const filter = {};
     if (req.query.status)   filter.status   = req.query.status;
     if (req.query.platform) filter.platform = req.query.platform;
@@ -161,6 +171,7 @@ exports.exportCSV = async (req, res, next) => {
 
 exports.printInvoice = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
     const order = await Order.findById(req.params.id)
       .populate('customer', 'name email phone')
       .populate('items.product', 'name images');

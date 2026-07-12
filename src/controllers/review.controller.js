@@ -1,9 +1,9 @@
-const Review        = require('../models/Review');
-const Product       = require('../models/Product');
-const StoreSettings = require('../models/StoreSettings');
-const AdminNotification = require('../models/AdminNotification');
+const { getReviewModel } = require('../models/Review');
+const { getProductModel } = require('../models/Product');
+const { getStoreSettingsModel } = require('../models/StoreSettings');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
 
-const recalcProductRating = async (productId) => {
+const recalcProductRating = async (Review, Product, productId) => {
   const result = await Review.aggregate([
     { $match: { product: productId, status: 'approved' } },
     { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
@@ -16,6 +16,7 @@ const recalcProductRating = async (productId) => {
 
 exports.list = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, parseInt(req.query.limit) || 20);
     const skip   = (page - 1) * limit;
@@ -39,6 +40,7 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
     const review = await Review.findById(req.params.id)
       .populate('product', 'name images')
       .populate('customer', 'name email');
@@ -49,6 +51,10 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const images = req.files ? req.files.map(f => `/uploads/reviews/${f.filename}`) : [];
     const settings = await StoreSettings.findOne({ storeId: 'default' }).select('reviews');
     const autoApprove = settings?.reviews?.autoApprove || false;
@@ -59,7 +65,7 @@ exports.create = async (req, res, next) => {
       status: autoApprove ? 'approved' : 'pending',
     });
 
-    if (autoApprove) await recalcProductRating(review.product);
+    if (autoApprove) await recalcProductRating(Review, Product, review.product);
 
     await AdminNotification.create({
       type:    'review',
@@ -74,6 +80,8 @@ exports.create = async (req, res, next) => {
 
 exports.updateStatus = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const { status, adminReply } = req.body;
     const validStatuses = ['pending', 'approved', 'rejected', 'reported'];
     if (!validStatuses.includes(status)) {
@@ -85,22 +93,25 @@ exports.updateStatus = async (req, res, next) => {
     const review = await Review.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!review) return res.status(404).json({ success: false, message: 'Review not found' });
 
-    await recalcProductRating(review.product);
+    await recalcProductRating(Review, Product, review.product);
     res.json({ success: true, data: review });
   } catch (err) { next(err); }
 };
 
 exports.remove = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const review = await Review.findByIdAndDelete(req.params.id);
     if (!review) return res.status(404).json({ success: false, message: 'Review not found' });
-    await recalcProductRating(review.product);
+    await recalcProductRating(Review, Product, review.product);
     res.json({ success: true, message: 'Review deleted' });
   } catch (err) { next(err); }
 };
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Review = getReviewModel(req.tenantConn);
     const [total, pending, approved, reported, avgRating] = await Promise.all([
       Review.countDocuments(),
       Review.countDocuments({ status: 'pending' }),
@@ -114,6 +125,7 @@ exports.getStats = async (req, res, next) => {
 
 exports.getSettings = async (req, res, next) => {
   try {
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
     const settings = await StoreSettings.findOne({ storeId: 'default' }).select('reviews');
     res.json({ success: true, data: settings?.reviews || {} });
   } catch (err) { next(err); }
@@ -121,6 +133,7 @@ exports.getSettings = async (req, res, next) => {
 
 exports.updateSettings = async (req, res, next) => {
   try {
+    const StoreSettings = getStoreSettingsModel(req.tenantConn);
     const prefixed = Object.fromEntries(Object.entries(req.body).map(([k, v]) => [`reviews.${k}`, v]));
     await StoreSettings.findOneAndUpdate({ storeId: 'default' }, { $set: prefixed }, { upsert: true });
     res.json({ success: true, message: 'Review settings updated' });

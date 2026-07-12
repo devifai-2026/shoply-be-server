@@ -101,4 +101,18 @@ customerSchema.index({ phone: 1 });
 customerSchema.index({ status: 1, type: 1 });
 customerSchema.index({ name: 'text', email: 'text', phone: 'text' });
 
-module.exports = mongoose.model('Customer', customerSchema);
+// Default-connection model — the single shared `ecom.Customer` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const CustomerDefault = mongoose.model('Customer', customerSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Customer' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getCustomerModel(conn) {
+  if (!conn) return CustomerDefault;
+  return conn.models.Customer || conn.model('Customer', customerSchema);
+}
+
+module.exports = CustomerDefault;
+module.exports.getCustomerModel = getCustomerModel;

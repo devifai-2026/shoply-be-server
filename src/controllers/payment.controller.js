@@ -1,6 +1,6 @@
 const crypto         = require('crypto');
-const PaymentGateway = require('../models/PaymentGateway');
-const Order          = require('../models/Order');
+const { getPaymentGatewayModel } = require('../models/PaymentGateway');
+const { getOrderModel } = require('../models/Order');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,6 +77,7 @@ const maskGateway = (gateway) => {
 
 exports.getGateways = async (req, res, next) => {
   try {
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const gateways = await PaymentGateway.find()
       .select('+fields.value')
       .sort({ sortOrder: 1 });
@@ -86,6 +87,7 @@ exports.getGateways = async (req, res, next) => {
 
 exports.updateGateway = async (req, res, next) => {
   try {
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const { fields } = req.body;
     const gateway = await PaymentGateway.findOne({ slug: req.params.slug })
       .select('+fields.value');
@@ -112,6 +114,7 @@ exports.updateGateway = async (req, res, next) => {
 
 exports.toggleGateway = async (req, res, next) => {
   try {
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const gateway = await PaymentGateway.findOne({ slug: req.params.slug })
       .select('+fields.value');
     if (!gateway) return res.status(404).json({ success: false, message: 'Gateway not found' });
@@ -123,6 +126,7 @@ exports.toggleGateway = async (req, res, next) => {
 
 exports.toggleSandbox = async (req, res, next) => {
   try {
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const gateway = await PaymentGateway.findOne({ slug: req.params.slug })
       .select('+fields.value');
     if (!gateway) return res.status(404).json({ success: false, message: 'Gateway not found' });
@@ -134,6 +138,8 @@ exports.toggleSandbox = async (req, res, next) => {
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const [totalRevenue, pendingSettlements, activeGateways] = await Promise.all([
       Order.aggregate([
         { $match: { paymentStatus: 'paid' } },
@@ -161,6 +167,7 @@ exports.getStats = async (req, res, next) => {
 
 exports.getStorefrontGateways = async (req, res, next) => {
   try {
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const gateways = await PaymentGateway.find({ isActive: true })
       .select('slug name type description sandboxMode sortOrder')
       .sort({ sortOrder: 1 })
@@ -173,6 +180,8 @@ exports.getStorefrontGateways = async (req, res, next) => {
 
 exports.initiatePayment = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const { gateway: slug, orderId, currency = 'INR', customerInfo = {} } = req.body;
 
     // The charge amount always comes from the persisted order — a client-sent
@@ -404,6 +413,8 @@ exports.initiatePayment = async (req, res, next) => {
 
 exports.verifyPayment = async (req, res, next) => {
   try {
+    const Order = getOrderModel(req.tenantConn);
+    const PaymentGateway = getPaymentGatewayModel(req.tenantConn);
     const { gateway: slug, orderId, paymentData } = req.body;
 
     const order = await Order.findOne({ _id: orderId, customer: req.customer._id });

@@ -1,8 +1,9 @@
-const Customer = require('../models/Customer');
-const Order    = require('../models/Order');
+const { getCustomerModel } = require('../models/Customer');
+const { getOrderModel }    = require('../models/Order');
 
 exports.list = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip  = (page - 1) * limit;
@@ -23,6 +24,8 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const Order    = getOrderModel(req.tenantConn);
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
 
@@ -37,6 +40,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.block = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findByIdAndUpdate(
       req.params.id,
       { status: 'blocked', type: 'blocked' },
@@ -49,6 +53,7 @@ exports.block = async (req, res, next) => {
 
 exports.unblock = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findByIdAndUpdate(
       req.params.id,
       { status: 'active', type: 'returning' },
@@ -61,6 +66,7 @@ exports.unblock = async (req, res, next) => {
 
 exports.exportCSV = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const filter = {};
     if (req.query.type && req.query.type !== 'all') filter.type = req.query.type;
     const customers = await Customer.find(filter).lean();
@@ -78,6 +84,7 @@ exports.exportCSV = async (req, res, next) => {
 
 exports.addAddress = async (req, res, next) => {
   try {
+    const Customer = getCustomerModel(req.tenantConn);
     const customer = await Customer.findByIdAndUpdate(
       req.params.id,
       { $push: { addresses: req.body } },

@@ -1,5 +1,5 @@
 const jwt    = require('jsonwebtoken');
-const Vendor = require('../models/Vendor');
+const { getVendorModel } = require('../models/Vendor');
 
 // Third auth tier alongside admin (auth.js) and customer (customerAuth.js).
 // Vendor tokens carry { id, role: 'vendor' } so they can't be replayed
@@ -15,6 +15,13 @@ const protectVendor = async (req, res, next) => {
     if (decoded.role !== 'vendor') {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
+    // Reject only when both sides carry a slug and they disagree — tokens
+    // issued before this change have no slug claim and stay valid against the
+    // default connection.
+    if (decoded.slug && req.tenant && decoded.slug !== req.tenant.slug) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const Vendor = getVendorModel(req.tenantConn);
     const vendor = await Vendor.findById(decoded.id);
     if (!vendor) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });

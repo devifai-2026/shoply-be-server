@@ -47,4 +47,18 @@ offerSchema.virtual('isLive').get(function () {
 
 offerSchema.index({ isActive: 1, type: 1 });
 
-module.exports = mongoose.model('Offer', offerSchema);
+// Default-connection model — the single shared `ecom.Offer` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const OfferDefault = mongoose.model('Offer', offerSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'Offer' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getOfferModel(conn) {
+  if (!conn) return OfferDefault;
+  return conn.models.Offer || conn.model('Offer', offerSchema);
+}
+
+module.exports = OfferDefault;
+module.exports.getOfferModel = getOfferModel;

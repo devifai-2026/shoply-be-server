@@ -48,4 +48,18 @@ const subOrderSchema = new mongoose.Schema({
 subOrderSchema.index({ vendor: 1, status: 1, createdAt: -1 });
 subOrderSchema.index({ order: 1 });
 
-module.exports = mongoose.model('SubOrder', subOrderSchema);
+// Default-connection model — the single shared `ecom.SubOrder` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const SubOrderDefault = mongoose.model('SubOrder', subOrderSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'SubOrder' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getSubOrderModel(conn) {
+  if (!conn) return SubOrderDefault;
+  return conn.models.SubOrder || conn.model('SubOrder', subOrderSchema);
+}
+
+module.exports = SubOrderDefault;
+module.exports.getSubOrderModel = getSubOrderModel;

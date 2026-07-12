@@ -1,17 +1,19 @@
-const Appearance = require('../models/Appearance');
+const { getAppearanceModel } = require('../models/Appearance');
 
-const getOrCreate = () =>
+const getOrCreate = (Appearance) =>
   Appearance.findOneAndUpdate({ storeId: 'default' }, { $setOnInsert: { storeId: 'default' } }, { upsert: true, new: true });
 
 exports.get = async (req, res, next) => {
   try {
-    const appearance = await getOrCreate();
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const appearance = await getOrCreate(Appearance);
     res.json({ success: true, data: appearance });
   } catch (err) { next(err); }
 };
 
 const updateSection = (section) => async (req, res, next) => {
   try {
+    const Appearance = getAppearanceModel(req.tenantConn);
     const update = { [section]: req.body };
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },
@@ -28,6 +30,7 @@ const updateSection = (section) => async (req, res, next) => {
 // unspecified tokens keep their existing DB values.
 exports.updateColors = async (req, res, next) => {
   try {
+    const Appearance = getAppearanceModel(req.tenantConn);
     const body = req.body || {};
     const hasStructured = body.colors || body.darkColors;
     const lightColors = hasStructured ? (body.colors || {}) : body;
@@ -56,6 +59,7 @@ exports.updateHomepageContent = updateSection('homepageContent');
 
 exports.updateCardStyle = async (req, res, next) => {
   try {
+    const Appearance = getAppearanceModel(req.tenantConn);
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },
       { $set: { productCardStyle: req.body.style } },
@@ -68,6 +72,7 @@ exports.updateCardStyle = async (req, res, next) => {
 exports.uploadLogo = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const Appearance = getAppearanceModel(req.tenantConn);
     const url = `/uploads/branding/${req.file.filename}`;
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },
@@ -81,6 +86,7 @@ exports.uploadLogo = async (req, res, next) => {
 exports.uploadFavicon = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const Appearance = getAppearanceModel(req.tenantConn);
     const url = `/uploads/branding/${req.file.filename}`;
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },
@@ -94,6 +100,7 @@ exports.uploadFavicon = async (req, res, next) => {
 exports.uploadAppIcon = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const Appearance = getAppearanceModel(req.tenantConn);
     const url = `/uploads/branding/${req.file.filename}`;
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },
@@ -110,6 +117,7 @@ exports.uploadBannerImage = async (req, res, next) => {
     const index = parseInt(req.params.index, 10);
     if (isNaN(index) || index < 0 || index > 4)
       return res.status(400).json({ success: false, message: 'Invalid banner index (0–4)' });
+    const Appearance = getAppearanceModel(req.tenantConn);
     const url = `/uploads/banners/${req.file.filename}`;
     const appearance = await Appearance.findOneAndUpdate(
       { storeId: 'default' },

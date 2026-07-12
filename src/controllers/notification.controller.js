@@ -1,7 +1,8 @@
-const AdminNotification = require('../models/AdminNotification');
+const { getAdminNotificationModel } = require('../models/AdminNotification');
 
 exports.list = async (req, res, next) => {
   try {
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const limit = parseInt(req.query.limit) || 30;
     const page  = Math.max(1, parseInt(req.query.page) || 1);
     const skip  = (page - 1) * limit;
@@ -21,6 +22,7 @@ exports.list = async (req, res, next) => {
 
 exports.markRead = async (req, res, next) => {
   try {
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const notification = await AdminNotification.findByIdAndUpdate(req.params.id, { isRead: true }, { new: true });
     if (!notification) return res.status(404).json({ success: false, message: 'Notification not found' });
     res.json({ success: true, data: notification });
@@ -29,6 +31,7 @@ exports.markRead = async (req, res, next) => {
 
 exports.markAllRead = async (req, res, next) => {
   try {
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     await AdminNotification.updateMany({ isRead: false }, { isRead: true });
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (err) { next(err); }
@@ -36,6 +39,7 @@ exports.markAllRead = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     await AdminNotification.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Notification deleted' });
   } catch (err) { next(err); }
@@ -43,6 +47,7 @@ exports.remove = async (req, res, next) => {
 
 exports.clearAll = async (req, res, next) => {
   try {
+    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     await AdminNotification.deleteMany({ isRead: true });
     res.json({ success: true, message: 'Read notifications cleared' });
   } catch (err) { next(err); }

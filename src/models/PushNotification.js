@@ -25,4 +25,18 @@ pushNotificationSchema.virtual('openRate').get(function () {
 
 pushNotificationSchema.index({ status: 1, scheduledAt: 1 });
 
-module.exports = mongoose.model('PushNotification', pushNotificationSchema);
+// Default-connection model — the single shared `ecom.PushNotification` collection,
+// preserved for any request that doesn't resolve to a tenant subdomain.
+const PushNotificationDefault = mongoose.model('PushNotification', pushNotificationSchema);
+
+// Per-tenant-connection resolver. Each mongoose Connection keeps its own model
+// registry, so registering 'PushNotification' on a tenant connection never collides with
+// the default connection's registration (OverwriteModelError only happens when
+// re-registering on the SAME connection).
+function getPushNotificationModel(conn) {
+  if (!conn) return PushNotificationDefault;
+  return conn.models.PushNotification || conn.model('PushNotification', pushNotificationSchema);
+}
+
+module.exports = PushNotificationDefault;
+module.exports.getPushNotificationModel = getPushNotificationModel;

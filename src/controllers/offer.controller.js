@@ -1,10 +1,11 @@
-const Offer   = require('../models/Offer');
-const Product = require('../models/Product');
+const { getOfferModel }   = require('../models/Offer');
+const { getProductModel } = require('../models/Product');
 
 // ─── Admin CRUD ───────────────────────────────────────────────────────────────
 
 exports.list = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const filter = {};
     if (req.query.type)     filter.type     = req.query.type;
     if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
@@ -15,6 +16,7 @@ exports.list = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const offer = await Offer.findById(req.params.id)
       .populate('products',   'name sku price images')
       .populate('categories', 'name');
@@ -25,6 +27,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const offer = await Offer.create(req.body);
     res.status(201).json({ success: true, data: offer });
   } catch (err) { next(err); }
@@ -32,6 +35,7 @@ exports.create = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const offer = await Offer.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!offer) return res.status(404).json({ success: false, message: 'Offer not found' });
     res.json({ success: true, data: offer });
@@ -40,6 +44,7 @@ exports.update = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const offer = await Offer.findByIdAndDelete(req.params.id);
     if (!offer) return res.status(404).json({ success: false, message: 'Offer not found' });
     res.json({ success: true, message: 'Offer deleted' });
@@ -48,6 +53,7 @@ exports.remove = async (req, res, next) => {
 
 exports.toggle = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const offer = await Offer.findById(req.params.id);
     if (!offer) return res.status(404).json({ success: false, message: 'Offer not found' });
     offer.isActive = !offer.isActive;
@@ -58,6 +64,7 @@ exports.toggle = async (req, res, next) => {
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const [total, active, byType] = await Promise.all([
       Offer.countDocuments(),
       Offer.countDocuments({ isActive: true }),
@@ -75,6 +82,7 @@ exports.getStats = async (req, res, next) => {
 
 exports.getActiveOffer = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const now = new Date();
     const offer = await Offer.findOne({
       _id:       req.params.id,
@@ -94,6 +102,7 @@ exports.getActiveOffer = async (req, res, next) => {
 
 exports.getActiveOffers = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const now = new Date();
     const offers = await Offer.find({
       isActive:  true,
@@ -116,6 +125,7 @@ exports.getActiveOffers = async (req, res, next) => {
 
 exports.calculateOfferDiscount = async (req, res, next) => {
   try {
+    const Offer = getOfferModel(req.tenantConn);
     const { items } = req.body;
     if (!items?.length) {
       return res.json({ success: true, data: { appliedOffers: [], totalDiscount: 0 } });

@@ -1,8 +1,9 @@
-const Brand   = require('../models/Brand');
-const Product = require('../models/Product');
+const { getBrandModel } = require('../models/Brand');
+const { getProductModel } = require('../models/Product');
 
 exports.list = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const { search, isActive } = req.query;
     const filter = {};
     if (isActive !== undefined) filter.isActive = isActive === 'true';
@@ -17,6 +18,7 @@ exports.list = async (req, res, next) => {
 
 exports.flat = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const brands = await Brand.find({ isActive: true }).select('name slug logo').sort({ name: 1 }).lean();
     res.json({ success: true, data: brands });
   } catch (err) { next(err); }
@@ -24,6 +26,7 @@ exports.flat = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const brand = await Brand.findById(req.params.id).populate('productCount');
     if (!brand) return res.status(404).json({ success: false, message: 'Brand not found' });
     res.json({ success: true, data: brand });
@@ -32,6 +35,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const data = { ...req.body };
     if (req.file) data.logo = `/uploads/brands/${req.file.filename}`;
     const brand = await Brand.create(data);
@@ -41,6 +45,7 @@ exports.create = async (req, res, next) => {
 
 exports.update = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const data = { ...req.body };
     if (req.file) data.logo = `/uploads/brands/${req.file.filename}`;
     const brand = await Brand.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true });
@@ -51,6 +56,8 @@ exports.update = async (req, res, next) => {
 
 exports.remove = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
+    const Product = getProductModel(req.tenantConn);
     const brand = await Brand.findById(req.params.id);
     if (!brand) return res.status(404).json({ success: false, message: 'Brand not found' });
     const hasProducts = await Product.exists({ brand: brand.name });
@@ -62,6 +69,7 @@ exports.remove = async (req, res, next) => {
 
 exports.toggle = async (req, res, next) => {
   try {
+    const Brand = getBrandModel(req.tenantConn);
     const brand = await Brand.findById(req.params.id);
     if (!brand) return res.status(404).json({ success: false, message: 'Brand not found' });
     brand.isActive = !brand.isActive;

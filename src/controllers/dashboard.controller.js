@@ -1,9 +1,12 @@
-const Order    = require('../models/Order');
-const Customer = require('../models/Customer');
-const Product  = require('../models/Product');
+const { getOrderModel }    = require('../models/Order');
+const { getCustomerModel } = require('../models/Customer');
+const { getProductModel }  = require('../models/Product');
 
 exports.getStats = async (req, res, next) => {
   try {
+    const Order    = getOrderModel(req.tenantConn);
+    const Customer = getCustomerModel(req.tenantConn);
+    const Product  = getProductModel(req.tenantConn);
     const now        = new Date();
     const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -43,6 +46,7 @@ exports.getStats = async (req, res, next) => {
 
 exports.getRecentOrders = async (req, res, next) => {
   try {
+    const Order  = getOrderModel(req.tenantConn);
     const limit  = parseInt(req.query.limit) || 10;
     const orders = await Order.find()
       .sort({ createdAt: -1 })
@@ -54,6 +58,7 @@ exports.getRecentOrders = async (req, res, next) => {
 
 exports.getPlatformSplit = async (req, res, next) => {
   try {
+    const Order  = getOrderModel(req.tenantConn);
     const result = await Order.aggregate([
       { $group: { _id: '$platform', count: { $sum: 1 }, revenue: { $sum: '$total' } } },
     ]);
