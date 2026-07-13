@@ -21,4 +21,8 @@ router.post('/appicon',      uploadAppIcon, ctrl.uploadAppIcon);
 router.post('/banner/:index', uploadBanner,  ctrl.uploadBannerImage);
 router.post('/category-tile/:index', uploadBanner, ctrl.uploadCategoryTileImage);
 
+router.post('/draft',         ctrl.saveDraft);
+router.post('/draft/publish', ctrl.publish);
+router.delete('/draft',       ctrl.discardDraft);
+
 module.exports = router;

@@ -252,6 +252,14 @@ exports.getAppearance = async (req, res, next) => {
     ]);
     const data = appearance.toObject();
 
+    // ?preview=1 renders the admin's staged draft instead of the live
+    // fields, for this request only — never persisted, never shown to a
+    // customer who didn't explicitly open the preview link. Falls back to
+    // live data if there's no draft in progress.
+    if (req.query.preview === '1' && data.draftData) {
+      Object.assign(data, data.draftData);
+    }
+
     // Migrate old promoBanner1/2 format → promoBanners array, but only when
     // one of them actually has real content — otherwise leave promoBanners
     // empty so the storefront hides the section instead of showing blank

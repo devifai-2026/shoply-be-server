@@ -131,6 +131,14 @@ const appearanceSchema = new mongoose.Schema({
     web: { type: String, default: '' },
     app: { type: String, default: '' },
   },
+
+  // Draft/publish workflow: "Save as Draft" writes a full snapshot of every
+  // editable field here instead of touching the live fields above; "Publish"
+  // copies draftData onto the live fields. A tenant with no draft in
+  // progress just has draftData: null — the live fields are always what
+  // customers see, this is purely an admin staging area on top of them.
+  isDraft:   { type: Boolean, default: false },
+  draftData: { type: mongoose.Schema.Types.Mixed, default: null },
 }, { timestamps: true });
 
 // Default-connection model — the single shared `ecom.Appearance` collection,

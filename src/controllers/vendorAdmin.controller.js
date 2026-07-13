@@ -1,6 +1,11 @@
+const crypto = require('crypto');
 const { getVendorModel }   = require('../models/Vendor');
 const { getProductModel }  = require('../models/Product');
 const { getSubOrderModel } = require('../models/SubOrder');
+const emailService = require('../services/email.service');
+
+const slugify = (s) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 const paginate = (req, cap = 50) => {
   const page  = Math.max(1, parseInt(req.query.page) || 1);
@@ -24,6 +29,56 @@ exports.list = async (req, res, next) => {
       Vendor.countDocuments(filter),
     ]);
     res.json({ success: true, data: vendors, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) { next(err); }
+};
+
+// Admin creates a vendor directly — skips the self-registration pending
+// queue entirely, since the admin is vouching for this seller themselves.
+// Generates a temp password and returns it ONCE in the response (never
+// retrievable again, same "shown once" convention used for PO-console
+// admin-credential reveal/rotate); also emails it if SMTP is configured.
+exports.create = async (req, res, next) => {
+  try {
+    const { name, email, phone, storeName, commissionRate } = req.body;
+    if (!name || !email || !storeName) {
+      return res.status(400).json({ success: false, message: 'name, email and storeName are required' });
+    }
+    const Vendor = getVendorModel(req.tenantConn);
+    const exists = await Vendor.findOne({ email: email.toLowerCase() });
+    if (exists) {
+      return res.status(409).json({ success: false, message: 'A vendor with this email already exists' });
+    }
+
+    let slug = slugify(storeName) || `store-${Date.now()}`;
+    if (await Vendor.exists({ slug })) slug = `${slug}-${Date.now().toString(36)}`;
+
+    const tempPassword = crypto.randomBytes(9).toString('base64url');
+
+    const vendor = await Vendor.create({
+      name, email, phone: phone || '', storeName, slug,
+      password: tempPassword,
+      commissionRate: Number(commissionRate) || 0,
+      status: 'approved', // admin-created — no pending review needed
+    });
+
+    const root = process.env.SAAS_PUBLIC_DOMAIN;
+    const loginUrl = req.tenant?.slug && root
+      ? `https://${req.tenant.slug}.seller.${root}`
+      : '';
+
+    emailService.sendVendorInviteEmail({
+      toEmail: email, toName: name, storeName, tempPassword, loginUrl,
+    }).catch(err => console.error('[VendorInvite] email failed:', err.message));
+
+    const publicVendor = vendor.toObject();
+    delete publicVendor.password;
+
+    res.status(201).json({
+      success: true,
+      data: publicVendor,
+      tempPassword,
+      message: 'Vendor created — share the temporary password shown below (it will not be shown again)',
+    });
   } catch (err) { next(err); }
 };
 

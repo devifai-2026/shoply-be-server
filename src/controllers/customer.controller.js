@@ -64,6 +64,51 @@ exports.unblock = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// PATCH /customers/bulk-block and /customers/bulk-unblock — same atomic
+// fetch-then-updateMany pattern as productModeration.controller.js's
+// bulkApprove: fetch the matching set first, updateMany, report counts.
+exports.bulkBlock = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ success: false, message: 'No customers selected' });
+
+    const targets = await Customer.find({ _id: { $in: ids } }).select('_id').lean();
+
+    const result = await Customer.updateMany(
+      { _id: { $in: targets.map(t => t._id) } },
+      { status: 'blocked', type: 'blocked' },
+    );
+
+    res.json({
+      success: true,
+      data: { matchedCount: result.matchedCount, modifiedCount: result.modifiedCount },
+      message: `${result.modifiedCount} of ${ids.length} customer(s) blocked`,
+    });
+  } catch (err) { next(err); }
+};
+
+exports.bulkUnblock = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ success: false, message: 'No customers selected' });
+
+    const targets = await Customer.find({ _id: { $in: ids } }).select('_id').lean();
+
+    const result = await Customer.updateMany(
+      { _id: { $in: targets.map(t => t._id) } },
+      { status: 'active', type: 'returning' },
+    );
+
+    res.json({
+      success: true,
+      data: { matchedCount: result.matchedCount, modifiedCount: result.modifiedCount },
+      message: `${result.modifiedCount} of ${ids.length} customer(s) unblocked`,
+    });
+  } catch (err) { next(err); }
+};
+
 exports.exportCSV = async (req, res, next) => {
   try {
     const Customer = getCustomerModel(req.tenantConn);
@@ -79,6 +124,35 @@ exports.exportCSV = async (req, res, next) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="customers.csv"');
     res.send(headers + rows);
+  } catch (err) { next(err); }
+};
+
+// GET /customers/resellers — admin list of opted-in resellers with lifetime
+// stats, for the Reseller admin panel.
+exports.listResellers = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const resellers = await Customer.find({ resellerEnabled: true })
+      .select('name email resellerCode resellerMarginPct resellerOrderCount resellerEarnings createdAt')
+      .sort({ resellerEarnings: -1 });
+    res.json({ success: true, data: resellers });
+  } catch (err) { next(err); }
+};
+
+// PATCH /customers/:id/reseller-margin — admin override of a single
+// reseller's margin %. Passing null reverts them to the platform-wide
+// StoreSettings.social.reseller.defaultMarginPct.
+exports.setResellerMargin = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const { marginPct } = req.body;
+    const customer = await Customer.findByIdAndUpdate(
+      req.params.id,
+      { resellerMarginPct: marginPct === null || marginPct === '' ? null : Number(marginPct) },
+      { new: true },
+    );
+    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+    res.json({ success: true, data: customer });
   } catch (err) { next(err); }
 };
 

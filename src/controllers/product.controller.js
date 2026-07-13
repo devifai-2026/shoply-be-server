@@ -42,11 +42,26 @@ exports.getOne = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// multipart/form-data (used by the create endpoint's file upload) always
+// stringifies nested fields — parse giftWrap/bundleOffer back into objects
+// when they arrive as JSON strings (a plain JSON request, e.g. from
+// vendor-web's non-file update flow, already sends real objects and is
+// left untouched).
+const parseNestedJsonFields = (body) => {
+  const parsed = { ...body };
+  ['giftWrap', 'bundleOffer'].forEach((key) => {
+    if (typeof parsed[key] === 'string') {
+      try { parsed[key] = JSON.parse(parsed[key]); } catch { delete parsed[key]; }
+    }
+  });
+  return parsed;
+};
+
 exports.create = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
     const images = req.files ? req.files.map(f => `/uploads/products/${f.filename}`) : [];
-    const product = await Product.create({ ...req.body, images });
+    const product = await Product.create({ ...parseNestedJsonFields(req.body), images });
     res.status(201).json({ success: true, data: product });
   } catch (err) { next(err); }
 };

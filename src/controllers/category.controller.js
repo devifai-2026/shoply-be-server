@@ -1,6 +1,16 @@
 const { getCategoryModel } = require('../models/Category');
 const { getProductModel }  = require('../models/Product');
 
+// multipart/form-data (used by both create/update here, since they accept
+// an optional image file) always stringifies nested fields.
+const parseTranslations = (body) => {
+  const parsed = { ...body };
+  if (typeof parsed.translations === 'string') {
+    try { parsed.translations = JSON.parse(parsed.translations); } catch { delete parsed.translations; }
+  }
+  return parsed;
+};
+
 const buildTree = (categories, parentId = null) =>
   categories
     .filter(c => String(c.parent || null) === String(parentId))
@@ -38,7 +48,7 @@ exports.getOne = async (req, res, next) => {
 exports.create = async (req, res, next) => {
   try {
     const Category = getCategoryModel(req.tenantConn);
-    const data = { ...req.body };
+    const data = parseTranslations(req.body);
     if (data.parent) {
       const parent = await Category.findById(data.parent);
       data.depth   = parent ? parent.depth + 1 : 0;
@@ -52,7 +62,7 @@ exports.create = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const Category = getCategoryModel(req.tenantConn);
-    const data = { ...req.body };
+    const data = parseTranslations(req.body);
     if ('parent' in data && !data.parent) data.parent = null;
     if (req.file) data.image = `/uploads/categories/${req.file.filename}`;
     const category = await Category.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true });

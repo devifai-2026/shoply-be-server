@@ -101,6 +101,149 @@ function buildPasswordResetHtml({ storeName, toName, resetUrl }) {
 </html>`;
 }
 
+exports.sendVendorInviteEmail = async ({ toEmail, toName, storeName: vendorStoreName, tempPassword, loginUrl }) => {
+  const [transporter, from] = await Promise.all([createTransporter(), getFromAddress()]);
+  const platformName = from.match(/"(.+?)"/)?.[1] || 'Our Marketplace';
+
+  await transporter.sendMail({
+    from,
+    to:      `"${toName}" <${toEmail}>`,
+    subject: `You've been added as a seller on ${platformName}`,
+    html:    buildVendorInviteHtml({ platformName, toName, vendorStoreName, tempPassword, loginUrl }),
+  });
+};
+
+function buildVendorInviteHtml({ platformName, toName, vendorStoreName, tempPassword, loginUrl }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>You've been added as a seller</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;max-width:600px;width:100%;">
+        <tr>
+          <td style="padding:36px 48px 28px;border-bottom:2px solid #111;">
+            <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;">${platformName}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px 48px 28px;">
+            <h1 style="margin:0 0 10px;font-size:26px;font-weight:300;letter-spacing:-.02em;">Welcome, ${vendorStoreName}</h1>
+            <p style="margin:0 0 24px;font-size:13px;color:#666;line-height:1.6;">
+              Hi ${toName}, an admin at ${platformName} has created a seller account for you. Your store is already
+              approved — you can log in and start listing products right away.
+            </p>
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:24px;width:100%;">
+              <tr>
+                <td style="background:#f5f5f5;padding:20px 24px;">
+                  <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#999;">Email</p>
+                  <p style="margin:0 0 16px;font-size:14px;font-weight:600;">${toEmail}</p>
+                  <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#999;">Temporary password</p>
+                  <p style="margin:0;font-size:14px;font-weight:600;font-family:monospace;">${tempPassword}</p>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0 0 24px;font-size:12px;color:#999;">
+              Please change this password after your first login.
+            </p>
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#111;">
+                  <a href="${loginUrl}" style="display:inline-block;padding:15px 36px;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#fff;text-decoration:none;">
+                    Log In to Your Store
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 48px;border-top:1px solid #ebebeb;">
+            <p style="margin:0;font-size:11px;color:#bbb;text-align:center;line-height:1.8;">
+              Questions? Simply reply to this email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+exports.sendCartReminderEmail = async ({ toEmail, toName, items }) => {
+  const [transporter, from] = await Promise.all([createTransporter(), getFromAddress()]);
+  const storeName = from.match(/"(.+?)"/)?.[1] || 'Our Store';
+
+  await transporter.sendMail({
+    from,
+    to:      `"${toName}" <${toEmail}>`,
+    subject: `You left something in your cart — ${storeName}`,
+    html:    buildCartReminderHtml({ storeName, toName, items }),
+  });
+};
+
+function buildCartReminderHtml({ storeName, toName, items }) {
+  const rows = (items || []).map(item => `
+    <tr>
+      <td style="padding:12px 0;border-bottom:1px solid #ebebeb;">
+        <table cellpadding="0" cellspacing="0"><tr>
+          ${item.image ? `<td style="width:56px;padding-right:16px;"><img src="${item.image}" width="56" height="56" style="object-fit:cover;border-radius:4px;" alt=""></td>` : ''}
+          <td>
+            <p style="margin:0 0 4px;font-size:13px;font-weight:600;">${item.name}</p>
+            <p style="margin:0;font-size:12px;color:#999;">Qty: ${item.quantity} · ₹${item.price}</p>
+          </td>
+        </tr></table>
+      </td>
+    </tr>`).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>You left something in your cart</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;max-width:600px;width:100%;">
+        <tr>
+          <td style="padding:36px 48px 28px;border-bottom:2px solid #111;">
+            <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;">${storeName}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px 48px 20px;">
+            <h1 style="margin:0 0 10px;font-size:26px;font-weight:300;letter-spacing:-.02em;">Still thinking it over?</h1>
+            <p style="margin:0 0 28px;font-size:13px;color:#666;line-height:1.6;">
+              Hi ${toName}, you left a few items in your cart. They're still here whenever you're ready.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 48px;">
+            <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 48px 24px;border-top:1px solid #ebebeb;">
+            <p style="margin:0;font-size:11px;color:#bbb;text-align:center;line-height:1.8;">
+              Thank you for shopping with ${storeName}.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 exports.sendOrderConfirmationEmail = async ({ toEmail, toName, order }) => {
   const [transporter, from] = await Promise.all([createTransporter(), getFromAddress()]);
 

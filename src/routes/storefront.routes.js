@@ -23,6 +23,9 @@ router.get('/offers',                require('../controllers/offer.controller').
 router.get('/offers/:id',            require('../controllers/offer.controller').getActiveOffer);
 router.post('/offers/calculate',     require('../controllers/offer.controller').calculateOfferDiscount);
 
+// Sponsored slots (admin-curated featured placement, no vendor payment flow)
+router.get('/sponsored-slots',       require('../controllers/sponsoredSlot.controller').getActiveSlots);
+
 // Appearance
 router.get('/appearance',            ctrl.getAppearance);
 

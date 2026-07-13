@@ -1,6 +1,7 @@
 const crypto   = require('crypto');
 const jwt      = require('jsonwebtoken');
 const { getCustomerModel } = require('../models/Customer');
+const { getWalletModel }   = require('../models/Wallet');
 const emailService = require('../services/email.service');
 
 const signToken = (id, slug) =>
@@ -371,4 +372,64 @@ exports.resetPassword = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+// GET /customer/wallet — balance + transaction history. Credited by refunds
+// (customer service decision) and reseller margins (customerOrder.controller.js
+// order-creation flow) — no cashback logic beyond those two sources.
+exports.getWallet = async (req, res, next) => {
+  try {
+    const Wallet = getWalletModel(req.tenantConn);
+    const wallet = await Wallet.findOne({ customer: req.customer._id }).lean();
+    if (!wallet) return res.json({ success: true, data: { balance: 0, transactions: [] } });
+    const transactions = [...wallet.transactions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ success: true, data: { balance: wallet.balance, transactions } });
+  } catch (err) { next(err); }
+};
+
+const slugifyReseller = (s) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+// GET /customer/reseller — dashboard: share code, referred-orders count,
+// lifetime earnings, current wallet balance. Returns enabled:false with no
+// other data if the customer hasn't opted in yet.
+exports.getReseller = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const Wallet    = getWalletModel(req.tenantConn);
+    const customer = await Customer.findById(req.customer._id)
+      .select('resellerEnabled resellerCode resellerOrderCount resellerEarnings').lean();
+    if (!customer?.resellerEnabled) {
+      return res.json({ success: true, data: { enabled: false } });
+    }
+    const wallet = await Wallet.findOne({ customer: req.customer._id }).select('balance').lean();
+    res.json({
+      success: true,
+      data: {
+        enabled: true,
+        resellerCode: customer.resellerCode,
+        orderCount: customer.resellerOrderCount || 0,
+        earnings: customer.resellerEarnings || 0,
+        walletBalance: wallet?.balance || 0,
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+// POST /customer/reseller/enable — opt-in. Generates a unique resellerCode
+// once; calling again when already enabled is a no-op (idempotent).
+exports.enableReseller = async (req, res, next) => {
+  try {
+    const Customer = getCustomerModel(req.tenantConn);
+    const customer = await Customer.findById(req.customer._id);
+    if (customer.resellerEnabled && customer.resellerCode) {
+      return res.json({ success: true, data: { resellerCode: customer.resellerCode } });
+    }
+    let code = slugifyReseller(customer.name) || `reseller-${Date.now()}`;
+    if (await Customer.exists({ resellerCode: code })) code = `${code}-${Date.now().toString(36)}`;
+    customer.resellerEnabled = true;
+    customer.resellerCode = code;
+    await customer.save();
+    res.json({ success: true, data: { resellerCode: code } });
+  } catch (err) { next(err); }
 };

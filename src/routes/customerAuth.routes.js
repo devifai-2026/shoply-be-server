@@ -9,6 +9,9 @@ router.post('/reset-password/:token', ctrl.resetPassword);
 router.get('/me',                protectCustomer, ctrl.me);
 router.put('/profile',           protectCustomer, ctrl.updateProfile);
 router.put('/change-password',   protectCustomer, ctrl.changePassword);
+router.get('/wallet',            protectCustomer, ctrl.getWallet);
+router.get('/reseller',          protectCustomer, ctrl.getReseller);
+router.post('/reseller/enable',  protectCustomer, ctrl.enableReseller);
 
 // Addresses
 router.get('/addresses',              protectCustomer, ctrl.getAddresses);

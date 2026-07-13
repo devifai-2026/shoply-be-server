@@ -17,6 +17,7 @@ router.put('/change-password', auth.changePassword);
 
 router.get('/dashboard',  requireApproved, portal.dashboard);
 router.get('/earnings',   requireApproved, portal.earnings);
+router.get('/analytics',  requireApproved, portal.analytics);
 router.get('/withdrawals',  requireApproved, portal.listWithdrawals);
 router.post('/withdrawals', requireApproved, portal.requestWithdrawal);
 

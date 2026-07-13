@@ -6,5 +6,6 @@ router.use(protect);
 router.get('/stats',          ctrl.getStats);
 router.get('/recent-orders',  ctrl.getRecentOrders);
 router.get('/platform-split', ctrl.getPlatformSplit);
+router.get('/abandoned-carts', ctrl.listAbandonedCarts);
 
 module.exports = router;

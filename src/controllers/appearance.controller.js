@@ -144,3 +144,63 @@ exports.uploadCategoryTileImage = async (req, res, next) => {
     res.json({ success: true, data: { image: url }, appearance });
   } catch (err) { next(err); }
 };
+
+// ─── Draft / Publish workflow ───────────────────────────────────────────────
+// "Save as Draft" stores a full snapshot of the editable fields (whatever
+// the admin currently has staged in the UI, sent as one payload) WITHOUT
+// touching the live fields customers see — those are only overwritten by
+// the individual updateX handlers above (used for immediate changes) or by
+// Publish below (used to promote a reviewed draft).
+const DRAFT_FIELDS = [
+  'colors', 'darkColors', 'typography', 'layout', 'homepageSections',
+  'header', 'footer', 'homepageContent', 'productCardStyle', 'customCSS',
+];
+
+exports.saveDraft = async (req, res, next) => {
+  try {
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const draftData = {};
+    DRAFT_FIELDS.forEach(k => { if (req.body[k] !== undefined) draftData[k] = req.body[k]; });
+
+    const appearance = await Appearance.findOneAndUpdate(
+      { storeId: 'default' },
+      { $set: { isDraft: true, draftData } },
+      { new: true, upsert: true },
+    );
+    res.json({ success: true, data: appearance, message: 'Draft saved' });
+  } catch (err) { next(err); }
+};
+
+exports.publish = async (req, res, next) => {
+  try {
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const current = await Appearance.findOne({ storeId: 'default' });
+    if (!current?.draftData) {
+      return res.status(400).json({ success: false, message: 'No draft to publish' });
+    }
+
+    const update = { isDraft: false, draftData: null };
+    DRAFT_FIELDS.forEach(k => {
+      if (current.draftData[k] !== undefined) update[k] = current.draftData[k];
+    });
+
+    const appearance = await Appearance.findOneAndUpdate(
+      { storeId: 'default' },
+      { $set: update },
+      { new: true, runValidators: true },
+    );
+    res.json({ success: true, data: appearance, message: 'Published' });
+  } catch (err) { next(err); }
+};
+
+exports.discardDraft = async (req, res, next) => {
+  try {
+    const Appearance = getAppearanceModel(req.tenantConn);
+    const appearance = await Appearance.findOneAndUpdate(
+      { storeId: 'default' },
+      { $set: { isDraft: false, draftData: null } },
+      { new: true },
+    );
+    res.json({ success: true, data: appearance, message: 'Draft discarded' });
+  } catch (err) { next(err); }
+};

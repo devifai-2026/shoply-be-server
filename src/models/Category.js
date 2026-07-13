@@ -12,6 +12,12 @@ const categorySchema = new mongoose.Schema({
   description: { type: String, default: '' },
   seoTitle:    { type: String, default: '' },
   seoDesc:     { type: String, default: '' },
+  // Per-locale display names for the Flutter app's language switcher
+  // (en/hi/bn) — falls back to `name` when a translation isn't set.
+  translations: {
+    hi: { type: String, default: '' },
+    bn: { type: String, default: '' },
+  },
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
 categorySchema.virtual('productCount', {

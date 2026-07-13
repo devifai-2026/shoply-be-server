@@ -8,11 +8,13 @@ const { getAdminNotificationModel } = require('../models/AdminNotification');
 const { getStoreSettingsModel }     = require('../models/StoreSettings');
 const { getCourierModel }           = require('../models/Courier');
 const { getCounterModel, nextValue } = require('../models/Counter');
+const { getWalletModel }            = require('../models/Wallet');
 const shiprocket        = require('../services/shiprocket.service');
 const pricing           = require('../services/pricing.service');
 const emailService      = require('../services/email.service');
 const invoiceService    = require('../services/invoice.service');
 const { rollupOrderStatus } = require('../utils/orderStatusRollup');
+const { creditWallet, debitWallet } = require('../utils/wallet');
 
 // Books a single Shiprocket shipment for a store-owned order (no vendor
 // split — the store itself fulfills these, so the fixed 'Primary' pickup
@@ -147,7 +149,7 @@ exports.createOrder = async (req, res, next) => {
     const Courier           = getCourierModel(req.tenantConn);
 
     const customerId = req.customer._id;
-    const { items, shippingAddress, paymentMethod, couponCode, platform } = req.body;
+    const { items, shippingAddress, paymentMethod, couponCode, platform, useWalletAmount, resellerCode } = req.body;
 
     if (!items?.length) {
       return res.status(400).json({ success: false, message: 'Order must have at least one item' });
@@ -275,7 +277,34 @@ exports.createOrder = async (req, res, next) => {
       (storeShippingCost + vendorShippingResults.reduce((s, r) => s + r.rate, 0)) * 100
     ) / 100;
 
-    const total = Math.max(0, subtotal + tax + shippingCost + giftWrapTotal - couponDiscount);
+    const preWalletTotal = Math.max(0, subtotal + tax + shippingCost + giftWrapTotal - couponDiscount - bundleSavings);
+
+    // Wallet balance is applied server-side only, capped at both the
+    // customer's real balance and the order total — never trust a
+    // client-sent amount. Actually debiting happens AFTER the order is
+    // created below, so a debit is never recorded against an order that
+    // ultimately failed to save.
+    const Wallet = getWalletModel(req.tenantConn);
+    let walletAmountUsed = 0;
+    if (useWalletAmount) {
+      const wallet = await Wallet.findOne({ customer: customerId }).select('balance').lean();
+      const requested = Number(useWalletAmount) > 0 ? Number(useWalletAmount) : 0;
+      walletAmountUsed = Math.min(requested, wallet?.balance || 0, preWalletTotal);
+    }
+    const total = Math.max(0, preWalletTotal - walletAmountUsed);
+
+    // Reseller referral: resolve the referring customer server-side from the
+    // code sent by the client, never trust a client-computed margin. A
+    // reseller can't earn a margin on their own order (self-referral guard).
+    let reseller = null;
+    if (resellerCode) {
+      reseller = await Customer.findOne({ resellerCode, resellerEnabled: true }).select('_id resellerMarginPct').lean();
+      if (reseller && reseller._id.toString() === customerId.toString()) reseller = null;
+    }
+    const resellerMarginPct = reseller
+      ? (reseller.resellerMarginPct != null ? reseller.resellerMarginPct : (settings?.social?.reseller?.defaultMarginPct ?? 0))
+      : 0;
+    const resellerMargin = reseller ? Math.round(subtotal * (resellerMarginPct / 100) * 100) / 100 : 0;
 
     const Counter = getCounterModel(req.tenantConn);
     const invoiceSeq = await nextValue(Counter, 'invoiceNumber', settings?.orders?.invoiceStartNumber || 1001);
@@ -292,6 +321,9 @@ exports.createOrder = async (req, res, next) => {
       discount:       couponDiscount,
       giftWrapTotal,
       bundleSavings,
+      walletAmountUsed,
+      resellerCode: reseller ? resellerCode : null,
+      resellerMargin,
       total,
       platform:       String(platform || '').toLowerCase() === 'app' ? 'App' : 'Web',
       shippingAddress,
@@ -299,6 +331,28 @@ exports.createOrder = async (req, res, next) => {
       couponCode:     couponCode || null,
       timeline:       [{ status: 'pending', note: 'Order placed' }],
     });
+
+    if (walletAmountUsed > 0) {
+      await debitWallet(req.tenantConn, {
+        customerId,
+        amount: walletAmountUsed,
+        reason: `Used at checkout for order ${order.orderNumber}`,
+        orderRef: order._id,
+      });
+    }
+
+    if (reseller && resellerMargin > 0) {
+      await creditWallet(req.tenantConn, {
+        customerId: reseller._id,
+        amount: resellerMargin,
+        reason: `Reseller margin for referred order ${order.orderNumber}`,
+        orderRef: order._id,
+      });
+      await Customer.updateOne(
+        { _id: reseller._id },
+        { $inc: { resellerOrderCount: 1, resellerEarnings: resellerMargin } },
+      );
+    }
 
     let createdSubOrders = [];
     if (vendorGroups.size) {

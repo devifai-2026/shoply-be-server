@@ -88,6 +88,14 @@ const customerSchema = new mongoose.Schema({
   wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   resetPasswordToken: String,
   resetPasswordExpire: Date,
+
+  // Reseller mode — opt-in share-with-margin. resellerCode is only ever set
+  // once a customer opts in (see customerAuth.controller.js enableReseller).
+  resellerEnabled:    { type: Boolean, default: false },
+  resellerCode:       { type: String, default: null, unique: true, sparse: true },
+  resellerMarginPct:  { type: Number, default: null }, // null = fall back to StoreSettings.social.reseller.defaultMarginPct
+  resellerOrderCount: { type: Number, default: 0 },
+  resellerEarnings:   { type: Number, default: 0 },
 }, { timestamps: true });
 
 customerSchema.pre('save', async function (next) {

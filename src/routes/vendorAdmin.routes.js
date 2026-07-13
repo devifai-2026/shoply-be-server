@@ -9,6 +9,7 @@ router.get('/stats', ctrl.stats);
 router.get('/:id',   ctrl.get);
 
 const adminOnly = authorize('superadmin', 'admin');
+router.post('/',                  adminOnly, ctrl.create);
 router.put('/:id',                adminOnly, ctrl.update);
 router.patch('/:id/approve',      adminOnly, ctrl.approve);
 router.patch('/:id/reject',       adminOnly, ctrl.reject);

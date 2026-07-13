@@ -38,6 +38,9 @@ const orderSchema = new mongoose.Schema({
   tax:          { type: Number, default: 0 },
   giftWrapTotal: { type: Number, default: 0 },
   bundleSavings: { type: Number, default: 0 }, // discount realized from accepted bundle offers
+  walletAmountUsed: { type: Number, default: 0 }, // wallet balance applied at checkout, reduces the gateway-charged amount
+  resellerCode:   { type: String, default: null }, // snapshot of the referring customer's resellerCode, if any
+  resellerMargin: { type: Number, default: 0 },     // ₹ margin credited to the reseller's wallet for this order
   total:        { type: Number, required: true },
   couponCode:   { type: String, default: null },
   platform:     { type: String, enum: ['Web', 'App'], default: 'Web' },

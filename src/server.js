@@ -4,12 +4,14 @@ const connectDB             = require('./config/db');
 const app                   = require('./app');
 const { initSocket }        = require('./socket');
 const { startPushScheduler } = require('./utils/pushScheduler');
+const { startAbandonedCartJob } = require('./utils/abandonedCartJob');
 
 const PORT = process.env.PORT || 5000;
 
 const start = async () => {
   await connectDB();
   startPushScheduler();
+  startAbandonedCartJob();
 
   const server = http.createServer(app);
   initSocket(server);

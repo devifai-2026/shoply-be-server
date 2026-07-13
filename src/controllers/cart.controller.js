@@ -48,7 +48,7 @@ exports.syncCart = async (req, res, next) => {
 
     await Cart.findOneAndUpdate(
       { customer: req.customer._id },
-      { $set: { items: mapped } },
+      { $set: { items: mapped, lastActivityAt: new Date(), reminderSentAt: null } },
       { upsert: true, new: true },
     );
 
@@ -110,7 +110,7 @@ exports.updateItem = async (req, res, next) => {
 
     const updated = await Cart.findOneAndUpdate(
       { customer: req.customer._id, 'items.product': productId },
-      { $set: { 'items.$.quantity': quantity } },
+      { $set: { 'items.$.quantity': quantity, lastActivityAt: new Date(), reminderSentAt: null } },
       { new: true },
     );
     if (!updated) return res.status(404).json({ success: false, message: 'Item not found in cart' });
@@ -126,7 +126,7 @@ exports.removeItem = async (req, res, next) => {
     const { productId } = req.params;
     await Cart.findOneAndUpdate(
       { customer: req.customer._id },
-      { $pull: { items: { product: productId } } },
+      { $pull: { items: { product: productId } }, $set: { lastActivityAt: new Date(), reminderSentAt: null } },
     );
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -138,7 +138,7 @@ exports.clearCart = async (req, res, next) => {
     const Cart = getCartModel(req.tenantConn);
     await Cart.findOneAndUpdate(
       { customer: req.customer._id },
-      { $set: { items: [] } },
+      { $set: { items: [], lastActivityAt: new Date(), reminderSentAt: null } },
       { upsert: true },
     );
     res.json({ success: true });

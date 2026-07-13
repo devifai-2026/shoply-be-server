@@ -392,3 +392,86 @@ exports.trackSubOrder = async (req, res, next) => {
     res.json({ success: true, data: { awbCode: subOrder.awbCode, liveTracking } });
   } catch (err) { next(err); }
 };
+
+// ─── Vendor analytics ──────────────────────────────────────────────────────────
+// Only the metrics genuinely computable from existing SubOrder fields —
+// confirmed no Cart-vendor-attribution, no returnReason, no historized
+// rating snapshots exist, so funnel-top, RTO-rate, and ratings-trend are
+// deliberately NOT included here (the UI surfaces this explicitly rather
+// than silently omitting them).
+exports.analytics = async (req, res, next) => {
+  try {
+    const SubOrder = getSubOrderModel(req.tenantConn);
+    const vendorId = req.vendor._id;
+    const days = Math.min(365, parseInt(req.query.days) || 90);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const [statusFunnel, dailyTrend, allForFulfillment] = await Promise.all([
+      // Order-status funnel — count of sub-orders currently in each status.
+      SubOrder.aggregate([
+        { $match: { vendor: vendorId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      // AOV + earnings/commission trend, grouped by day.
+      SubOrder.aggregate([
+        { $match: { vendor: vendorId, createdAt: { $gte: since } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            orderCount: { $sum: 1 },
+            subtotal: { $sum: '$subtotal' },
+            commissionAmount: { $sum: '$commissionAmount' },
+            vendorEarning: { $sum: '$vendorEarning' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      // Fulfillment-stage duration — computed in JS below from each
+      // sub-order's own timeline, since the deltas aren't expressible as a
+      // single aggregation stage without $unwind + self-joins that would be
+      // overkill for what's a fairly small per-vendor timeline array.
+      SubOrder.find({ vendor: vendorId, createdAt: { $gte: since }, 'timeline.1': { $exists: true } })
+        .select('timeline')
+        .limit(500)
+        .lean(),
+    ]);
+
+    const funnel = Object.fromEntries(statusFunnel.map(s => [s._id, s.count]));
+
+    const trend = dailyTrend.map(d => ({
+      date: d._id,
+      orderCount: d.orderCount,
+      aov: d.orderCount ? Math.round(d.subtotal / d.orderCount) : 0,
+      commissionAmount: Math.round(d.commissionAmount * 100) / 100,
+      vendorEarning: Math.round(d.vendorEarning * 100) / 100,
+    }));
+
+    // Average time spent per status transition, across all sampled sub-orders.
+    const stageDurations = {}; // status -> { totalMs, count }
+    allForFulfillment.forEach(so => {
+      const events = [...(so.timeline || [])].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      for (let i = 1; i < events.length; i++) {
+        const status = events[i].status;
+        const ms = new Date(events[i].createdAt) - new Date(events[i - 1].createdAt);
+        if (!stageDurations[status]) stageDurations[status] = { totalMs: 0, count: 0 };
+        stageDurations[status].totalMs += ms;
+        stageDurations[status].count += 1;
+      }
+    });
+    const avgFulfillmentHours = Object.fromEntries(
+      Object.entries(stageDurations).map(([status, { totalMs, count }]) => [
+        status, Math.round((totalMs / count / (1000 * 60 * 60)) * 10) / 10,
+      ]),
+    );
+
+    res.json({
+      success: true,
+      data: {
+        funnel,
+        trend,
+        avgFulfillmentHours,
+        notAvailable: ['rtoRate', 'ratingsTrend', 'cartFunnelTop'], // flagged, not silently omitted
+      },
+    });
+  } catch (err) { next(err); }
+};

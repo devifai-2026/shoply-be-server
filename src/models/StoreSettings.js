@@ -71,6 +71,11 @@ const storeSettingsSchema = new mongoose.Schema({
     appleLogin:    { type: Boolean, default: false },
   },
 
+  reseller: {
+    enabled:            { type: Boolean, default: true },
+    defaultMarginPct:   { type: Number, default: 5, min: 0, max: 100 },
+  },
+
   shipping: {
     weightEnabled:  { type: Boolean, default: false },
     baseWeight:     { type: Number, default: 1 },

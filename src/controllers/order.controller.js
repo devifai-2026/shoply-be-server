@@ -6,6 +6,7 @@ const { getVendorModel }            = require('../models/Vendor');
 const { getAdminNotificationModel } = require('../models/AdminNotification');
 const { getStoreSettingsModel }     = require('../models/StoreSettings');
 const invoiceService                = require('../services/invoice.service');
+const { creditWallet }               = require('../utils/wallet');
 
 const generateOrderNumber = () => `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -131,7 +132,7 @@ exports.create = async (req, res, next) => {
 exports.updateStatus = async (req, res, next) => {
   try {
     const Order = getOrderModel(req.tenantConn);
-    const { status, note, trackingNumber, courierName } = req.body;
+    const { status, note, trackingNumber, courierName, creditWallet: shouldCreditWallet, walletCreditAmount } = req.body;
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
@@ -148,7 +149,57 @@ exports.updateStatus = async (req, res, next) => {
       .populate('customer', 'name email');
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
-    res.json({ success: true, data: order });
+    // Optional: admin marks a refund as a wallet credit instead of (or in
+    // addition to) an external refund — the platform has no payment-gateway
+    // refund integration, so this is the only in-app way money moves back
+    // to a customer. Amount defaults to the order total but the admin can
+    // enter a partial amount (e.g. a partial return).
+    let walletResult = null;
+    if (status === 'refunded' && shouldCreditWallet) {
+      const amount = Number(walletCreditAmount) > 0 ? Number(walletCreditAmount) : order.total;
+      walletResult = await creditWallet(req.tenantConn, {
+        customerId: order.customer._id,
+        amount,
+        reason: `Refund for order ${order.orderNumber}`,
+        orderRef: order._id,
+      });
+    }
+
+    res.json({ success: true, data: order, wallet: walletResult ? { balance: walletResult.balance } : undefined });
+  } catch (err) { next(err); }
+};
+
+// PATCH /orders/bulk-status — same atomic fetch-then-updateMany pattern as
+// productModeration.controller.js's bulkApprove: fetch the matching set first
+// (so we know exactly which orders were eligible), updateMany, then report
+// matched/modified counts back to the caller.
+exports.bulkUpdateStatus = async (req, res, next) => {
+  try {
+    const Order = getOrderModel(req.tenantConn);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const { status, note } = req.body;
+    const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'];
+
+    if (!ids.length) return res.status(400).json({ success: false, message: 'No orders selected' });
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    const targets = await Order.find({ _id: { $in: ids } }).select('_id').lean();
+
+    const result = await Order.updateMany(
+      { _id: { $in: targets.map(t => t._id) } },
+      {
+        $set: { status },
+        $push: { timeline: { status, note: note || '', createdAt: new Date() } },
+      },
+    );
+
+    res.json({
+      success: true,
+      data: { matchedCount: result.matchedCount, modifiedCount: result.modifiedCount },
+      message: `${result.modifiedCount} of ${ids.length} order(s) updated`,
+    });
   } catch (err) { next(err); }
 };
 

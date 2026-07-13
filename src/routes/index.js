@@ -36,6 +36,7 @@ router.use('/withdrawals',        require('./withdrawal.routes'));
 router.use('/coupons',            require('./coupon.routes'));
 router.use('/flash-sales',        require('./flashSale.routes'));
 router.use('/offers',             require('./offer.routes'));
+router.use('/sponsored-slots',    require('./sponsoredSlot.routes'));
 router.use('/push-notifications', require('./pushNotification.routes'));
 router.use('/appearance',         require('./appearance.routes'));
 router.use('/settings',           require('./settings.routes'));
