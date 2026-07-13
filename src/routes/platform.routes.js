@@ -22,6 +22,7 @@ router.post('/tenants/logo-upload', uploadTenantLogo, ctrl.uploadTenantLogo);
 router.get('/tenants/:slug',    ctrl.getTenant);
 router.patch('/tenants/:slug/suspend',    ctrl.suspendTenant);
 router.patch('/tenants/:slug/reactivate', ctrl.reactivateTenant);
+router.patch('/tenants/:slug/addons/:addonKey', ctrl.setAddon);
 router.delete('/tenants/:slug',           ctrl.deleteTenant);
 router.put('/tenants/:slug/secrets',      ctrl.rotateSecrets);
 router.get('/tenants/:slug/admin-credentials',         ctrl.getAdminCredentials);
@@ -35,5 +36,10 @@ router.get('/builds/:id/download', ctrl.buildDownload);
 router.get('/keystore',          keystore.get);
 router.post('/keystore/upload',  keystore.upload);
 router.post('/keystore/generate', keystore.generate);
+
+// AI product review prompt (platform-wide, owner-only)
+router.get('/ai-prompt',        ctrl.getAiPrompt);
+router.put('/ai-prompt',        ctrl.updateAiPrompt);
+router.post('/ai-prompt/test',  ctrl.testAiPrompt);
 
 module.exports = router;

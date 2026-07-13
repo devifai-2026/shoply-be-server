@@ -1,5 +1,11 @@
 const mongoose = require('mongoose');
 
+// Fixed icon set for homepageContent.trustBadges — both frontends (web +
+// Flutter) ship these exact icons locally, so we validate against a closed
+// set rather than accepting arbitrary strings that could reference an icon
+// neither client has.
+const TRUST_ICON_KEYS = ['truck', 'shield', 'refresh', 'headphones', 'check', 'lock', 'gift', 'star'];
+
 const appearanceSchema = new mongoose.Schema({
   storeId: { type: String, default: 'default', unique: true },
 
@@ -99,6 +105,19 @@ const appearanceSchema = new mongoose.Schema({
       }],
       default: [],
       validate: { validator: (v) => v.length <= 6, message: 'Maximum 6 tiles allowed' },
+    },
+    // Admin-editable trust bar (was previously a hardcoded "Free Delivery /
+    // Secure Payment / Easy Returns / 24/7 Support" row on both web and app).
+    // `icon` is a key into a small fixed icon set the frontends already ship
+    // (see TRUST_ICON_KEYS below) — not a free-text/URL field, so there's no
+    // arbitrary-icon-upload surface to build.
+    trustBadges: {
+      type: [{
+        icon:  { type: String, default: 'truck' },
+        label: { type: String, default: '' },
+      }],
+      default: [],
+      validate: { validator: (v) => v.length <= 6, message: 'Maximum 6 trust badges allowed' },
     },
   },
 

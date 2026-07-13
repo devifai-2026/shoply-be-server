@@ -57,7 +57,7 @@ exports.get = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const Vendor = getVendorModel(req.tenantConn);
-    const allowed = ['commissionRate', 'storeName', 'description', 'phone', 'gstin', 'pan', 'bankDetails', 'pickupAddress', 'shiprocketPickupLocation'];
+    const allowed = ['commissionRate', 'storeName', 'description', 'phone', 'gstin', 'pan', 'bankDetails', 'pickupAddress', 'shiprocketPickupLocation', 'autoApprove'];
     const updates = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
     const vendor = await Vendor.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });

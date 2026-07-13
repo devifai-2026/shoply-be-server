@@ -24,6 +24,7 @@ router.use('/auth',               require('./auth.routes'));
 router.use('/dashboard',          require('./dashboard.routes'));
 router.use('/analytics',          require('./analytics.routes'));
 router.use('/visitors',           require('./visitors.routes'));
+router.use('/products/moderation', require('./productModeration.routes'));
 router.use('/products',           require('./product.routes'));
 router.use('/categories',         require('./category.routes'));
 router.use('/brands',             require('./brand.routes'));
@@ -44,5 +45,6 @@ router.use('/reviews',            require('./review.routes'));
 router.use('/reports',            require('./report.routes'));
 router.use('/notifications',      require('./notification.routes'));
 router.use('/blogs',              require('./blog.routes'));
+router.use('/tenant-config',      require('./tenantConfig.routes'));
 
 module.exports = router;

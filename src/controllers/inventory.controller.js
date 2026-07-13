@@ -1,5 +1,5 @@
 const { getProductModel } = require('../models/Product');
-const { getAdminNotificationModel } = require('../models/AdminNotification');
+const { notifyAdmin } = require('../utils/notify');
 
 exports.list = async (req, res, next) => {
   try {
@@ -37,7 +37,6 @@ exports.getAlerts = async (req, res, next) => {
 exports.updateStock = async (req, res, next) => {
   try {
     const Product = getProductModel(req.tenantConn);
-    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const { stock, alertLevel } = req.body;
     const update = {};
     if (stock !== undefined)      update.stock      = stock;
@@ -47,7 +46,7 @@ exports.updateStock = async (req, res, next) => {
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
 
     if (product.stock <= product.alertLevel) {
-      await AdminNotification.create({
+      await notifyAdmin(req.tenantConn, req.tenant?.slug, {
         type:    'low_stock',
         title:   'Low Stock Alert',
         message: `"${product.name}" stock is at ${product.stock} units`,

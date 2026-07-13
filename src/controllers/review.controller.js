@@ -1,7 +1,7 @@
 const { getReviewModel } = require('../models/Review');
 const { getProductModel } = require('../models/Product');
 const { getStoreSettingsModel } = require('../models/StoreSettings');
-const { getAdminNotificationModel } = require('../models/AdminNotification');
+const { notifyAdmin } = require('../utils/notify');
 
 const recalcProductRating = async (Review, Product, productId) => {
   const result = await Review.aggregate([
@@ -54,7 +54,6 @@ exports.create = async (req, res, next) => {
     const Review = getReviewModel(req.tenantConn);
     const Product = getProductModel(req.tenantConn);
     const StoreSettings = getStoreSettingsModel(req.tenantConn);
-    const AdminNotification = getAdminNotificationModel(req.tenantConn);
     const images = req.files ? req.files.map(f => `/uploads/reviews/${f.filename}`) : [];
     const settings = await StoreSettings.findOne({ storeId: 'default' }).select('reviews');
     const autoApprove = settings?.reviews?.autoApprove || false;
@@ -67,7 +66,7 @@ exports.create = async (req, res, next) => {
 
     if (autoApprove) await recalcProductRating(Review, Product, review.product);
 
-    await AdminNotification.create({
+    await notifyAdmin(req.tenantConn, req.tenant?.slug, {
       type:    'review',
       title:   'New Review Submitted',
       message: `${autoApprove ? 'Auto-approved' : 'Pending review'} for product ${review.product}`,

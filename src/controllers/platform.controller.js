@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { Tenant, TenantSecret, BuildJob, OwnerUser } = require('../models/control');
+const { Tenant, TenantSecret, BuildJob, OwnerUser, AiPrompt } = require('../models/control');
+const vertexAiService = require('../services/vertexAi.service');
 const { signOwnerToken } = require('../middleware/ownerAuth');
 const provision   = require('../services/provision.service');
 const buildDispatch = require('../services/buildDispatch.service');
@@ -164,6 +165,27 @@ const setStatus = (status) => async (req, res, next) => {
 };
 exports.suspendTenant    = setStatus('suspended');
 exports.reactivateTenant = setStatus('active');
+
+// Premium add-ons — PO-Console-only toggles. Whitelist the addon key so an
+// arbitrary/typo'd key can't silently create a new, unvalidated addons.*
+// field on the Tenant document.
+const ADDON_KEYS = ['aiProductReview'];
+exports.setAddon = async (req, res, next) => {
+  try {
+    const { addonKey } = req.params;
+    if (!ADDON_KEYS.includes(addonKey)) {
+      return res.status(400).json({ success: false, message: `Unknown addon: ${addonKey}` });
+    }
+    const enabled = !!req.body.enabled;
+    const tenant = await Tenant.findOneAndUpdate(
+      { slug: req.params.slug },
+      { [`addons.${addonKey}.enabled`]: enabled, [`addons.${addonKey}.enabledAt`]: enabled ? new Date() : null },
+      { new: true },
+    );
+    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    res.json({ success: true, data: tenant.addons, message: `${addonKey} ${enabled ? 'enabled' : 'disabled'}` });
+  } catch (err) { next(err); }
+};
 
 // Drops the tenant's database (default-cluster tenants) and removes all
 // control-plane records. Does NOT clear Caddy's cached TLS cert for the
@@ -342,5 +364,60 @@ exports.buildCallback = async (req, res, next) => {
         console.error('[buildCallback] prune failed:', e.message));
     }
     res.json({ success: true });
+  } catch (err) { next(err); }
+};
+
+// ─── AI Product Review prompt (platform-wide, owner-only) ────────────────────
+// Single editable system prompt shared by every tenant that has the
+// aiProductReview addon enabled. Always read fresh from DB at review time
+// (see aiReview.service.js) — never cached in application code — so an
+// edit here takes effect on the very next product submission, no redeploy.
+
+exports.getAiPrompt = async (req, res, next) => {
+  try {
+    const doc = await AiPrompt.findOneAndUpdate(
+      { key: 'product_review' },
+      { $setOnInsert: { key: 'product_review' } },
+      { upsert: true, new: true },
+    );
+    res.json({ success: true, data: doc });
+  } catch (err) { next(err); }
+};
+
+exports.updateAiPrompt = async (req, res, next) => {
+  try {
+    const { prompt } = req.body;
+    if (typeof prompt !== 'string') {
+      return res.status(400).json({ success: false, message: 'prompt must be a string' });
+    }
+    const doc = await AiPrompt.findOneAndUpdate(
+      { key: 'product_review' },
+      { prompt },
+      { upsert: true, new: true },
+    );
+    res.json({ success: true, data: doc, message: 'Prompt saved' });
+  } catch (err) { next(err); }
+};
+
+// Runs the CURRENTLY SAVED prompt (re-fetched from DB, ignoring whatever the
+// owner has typed but not yet saved in the textarea) against a sample
+// product the owner provides, so they can see the real behavior before it
+// affects live vendor traffic. Does not touch any tenant's real data.
+exports.testAiPrompt = async (req, res, next) => {
+  try {
+    const doc = await AiPrompt.findOne({ key: 'product_review' });
+    const prompt = doc?.prompt?.trim();
+    if (!prompt) {
+      return res.status(400).json({ success: false, message: 'Save a prompt before testing it' });
+    }
+    const { name, description, category, brand, catalogSample } = req.body;
+    if (!name) return res.status(400).json({ success: false, message: 'Sample product name is required' });
+
+    const result = await vertexAiService.analyzeProduct({
+      prompt,
+      product: { name, description, category, brand, images: [] },
+      catalogSample: Array.isArray(catalogSample) ? catalogSample : [],
+    });
+    res.json({ success: true, data: result });
   } catch (err) { next(err); }
 };

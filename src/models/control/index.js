@@ -31,6 +31,16 @@ const tenantSchema = new Schema({
     applicationId: { type: String, default: '' },
     appLabel:      { type: String, default: '' },
   },
+
+  // Premium add-ons — PO-Console-only toggles. Never self-serve from
+  // ecom-admin; tenants only see the resulting behavior via a read-only
+  // bridge endpoint (GET /api/tenant-config).
+  addons: {
+    aiProductReview: {
+      enabled:   { type: Boolean, default: false },
+      enabledAt: { type: Date, default: null },
+    },
+  },
 }, { timestamps: true });
 
 // ─── TenantSecret (encrypted) ─────────────────────────────────────────────────
@@ -99,6 +109,17 @@ ownerUserSchema.methods.matchPassword = function (entered) {
   return bcrypt.compare(entered, this.password);
 };
 
+// ─── AiPrompt (singleton per key) ─────────────────────────────────────────────
+// Platform-wide, not per-tenant — the prompt itself is shared across every
+// tenant that has the aiProductReview addon enabled; only the addon's
+// on/off state is per-tenant (see Tenant.addons above). Always read fresh
+// from DB at review time — never cached in application code — so an owner
+// edit takes effect on the very next product submission.
+const aiPromptSchema = new Schema({
+  key:    { type: String, required: true, unique: true, default: 'product_review' },
+  prompt: { type: String, default: '' },
+}, { timestamps: true });
+
 // Bind all models to the control connection
 const db = getControlDb();
 module.exports = {
@@ -107,4 +128,5 @@ module.exports = {
   Keystore:     db.model('Keystore', keystoreSchema),
   BuildJob:     db.model('BuildJob', buildJobSchema),
   OwnerUser:    db.model('OwnerUser', ownerUserSchema),
+  AiPrompt:     db.model('AiPrompt', aiPromptSchema),
 };
